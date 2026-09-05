@@ -10,6 +10,8 @@ import traceback
 from dataclasses import asdict
 from datetime import datetime, timezone
 
+import yfinance as yf
+
 from brokers.ibkr_adapter import IBKRAdapter
 from brokers.okx_adapter import OKXAdapter
 from config.settings import load_settings
@@ -18,7 +20,29 @@ from risk.circuit_breaker import CircuitBreaker, TradingHalted
 from risk.spend_guard import SpendGuard, SpendLimitError
 from signals.crypto_trend import rank_universe as rank_crypto
 from signals.darvas import compute_box, scan_for_breakouts
+from signals.indicators import rsi, sma_trend, volatility_regime
 from signals.llm_review import review_signal
+
+
+def _indicator_confirmation(closes: list[float]) -> dict:
+    """Traditional-TA context alongside the LLM panel's vote: momentum
+    (RSI), trend direction (SMA crossover), and a volatility reading."""
+    return {
+        "rsi_14": rsi(closes),
+        "sma_trend": sma_trend(closes),
+        "volatility_20": volatility_regime(closes),
+    }
+
+
+def _fails_indicator_confirmation(indicators: dict) -> str | None:
+    """None if the indicators don't object; otherwise the reason they do.
+    Two well-worn TA rules: don't buy an already-overbought move, don't buy
+    against the prevailing trend."""
+    if indicators["rsi_14"] is not None and indicators["rsi_14"] >= 80:
+        return f"overbought (RSI {indicators['rsi_14']} >= 80)"
+    if indicators["sma_trend"] == "down":
+        return "against prevailing trend (SMA fast < slow)"
+    return None
 
 
 def _log(logs_dir, filename: str, record: dict) -> None:
@@ -68,12 +92,21 @@ def run_stocks(settings) -> None:
             return
 
         top = candidates[0]
-        review = review_signal(settings.gemini_api_key, asdict(top))
-        decision_record = {"pool": "stocks", "signal": asdict(top), "review": asdict(review)}
+        closes = yf.Ticker(top.symbol).history(period="3mo")["Close"].tolist()
+        indicators = _indicator_confirmation(closes)
+        signal_payload = {**asdict(top), "indicators": indicators}
+        review = review_signal(settings.gemini_api_key, settings.nvidia_api_key, signal_payload)
+        decision_record = {"pool": "stocks", "signal": signal_payload, "review": asdict(review)}
 
         if review.action != "buy" or review.confidence < 0.6:
             _log(settings.logs_dir, "decisions.log", {**decision_record, "result": "skipped"})
             return
+
+        if settings.require_indicator_confirmation:
+            reason = _fails_indicator_confirmation(indicators)
+            if reason:
+                _log(settings.logs_dir, "decisions.log", {**decision_record, "result": "skipped_indicators", "reason": reason})
+                return
 
         trade_usd = pool_value * settings.max_trade_pct
         guard.check_and_record(trade_usd, pool_value)
@@ -106,13 +139,22 @@ def run_crypto(settings) -> None:
         return
 
     top = ranked[0]
-    review = review_signal(settings.gemini_api_key, asdict(top))
-    decision_record = {"pool": "crypto", "signal": asdict(top), "review": asdict(review)}
+    closes = okx.get_candles(top.inst_id)
+    indicators = _indicator_confirmation(closes)
+    signal_payload = {**asdict(top), "indicators": indicators}
+    review = review_signal(settings.gemini_api_key, settings.nvidia_api_key, signal_payload)
+    decision_record = {"pool": "crypto", "signal": signal_payload, "review": asdict(review)}
 
     try:
         if review.action != "buy" or review.confidence < 0.6:
             _log(settings.logs_dir, "decisions.log", {**decision_record, "result": "skipped"})
             return
+
+        if settings.require_indicator_confirmation:
+            reason = _fails_indicator_confirmation(indicators)
+            if reason:
+                _log(settings.logs_dir, "decisions.log", {**decision_record, "result": "skipped_indicators", "reason": reason})
+                return
 
         trade_usd = pool_value * settings.max_trade_pct
         guard.check_and_record(trade_usd, pool_value)

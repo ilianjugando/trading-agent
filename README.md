@@ -20,6 +20,10 @@ copy .env.example .env
 
 Edit `.env`:
 - `GEMINI_API_KEY` — from https://aistudio.google.com/apikey (free tier)
+- `NVIDIA_API_KEY` — optional, from https://build.nvidia.com. Adds a panel of
+  extra models (Llama, Mixtral, DeepSeek) alongside Gemini for the trade
+  review vote — majority wins, ties/no-majority default to hold. Leave blank
+  to use Gemini alone.
 - `OKX_DEMO_*` — create Demo Trading API keys at OKX (toggle "Demo Trading" in
   the API management page before generating them; separate from live keys)
 - `OKX_*` — live API keys, only needed once you're ready for `--mode live`
@@ -81,6 +85,15 @@ Only after paper mode looks correct for a while:
 - Fund the accounts (your $100 IBKR transfer, $50 into OKX)
 - Change the Task Scheduler action's arguments to `--mode live`
 - Watch `logs/` closely for the first several runs
+
+## Extra confirmation: traditional TA alongside the LLM panel
+
+`signals/indicators.py` computes RSI(14), an SMA(10/30) trend read, and a
+volatility reading from recent closes. These are always attached to the
+signal JSON the LLM panel sees (`decisions.log` too), so the panel's
+reasoning has that context. Set `REQUIRE_INDICATOR_CONFIRMATION=true` to
+also make them a hard gate: a panel-approved buy is still rejected if RSI
+>= 80 (overbought) or the SMA trend is down. Off by default.
 
 ## Adjusting risk limits
 

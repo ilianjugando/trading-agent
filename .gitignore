@@ -5,3 +5,4 @@ __pycache__/
 venv/
 logs/*.log
 state/*.json
+graphify-out/

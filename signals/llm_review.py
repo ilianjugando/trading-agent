@@ -1,14 +1,24 @@
-"""Gemini reviews a computed numeric signal and returns a structured
+"""A panel of models reviews a computed numeric signal and returns a joint
 proposal. This is advisory only -- risk/spend_guard.py and
 risk/circuit_breaker.py are the actual gatekeepers and cannot be
 overridden by anything returned here.
 """
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from urllib import request as urlrequest
 
 import google.generativeai as genai
 
-_MODEL_NAME = "gemini-2.5-flash"
+_GEMINI_MODEL = "gemini-2.5-flash"
+
+# One NVIDIA Build API key gives access to all of these (https://build.nvidia.com).
+_NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+_NVIDIA_MODELS = [
+    "meta/llama-3.1-70b-instruct",
+    "mistralai/mixtral-8x22b-instruct-v0.1",
+    "deepseek-ai/deepseek-r1",
+]
 
 _PROMPT_TEMPLATE = """You are a trading signal reviewer, not a trader. You do not place orders.
 Given this numeric momentum signal, decide whether it's worth proposing a small BUY.
@@ -28,25 +38,70 @@ class LLMReview:
     reasoning: str
 
 
-def review_signal(api_key: str, signal: dict) -> LLMReview:
-    """Fails safe: any parsing/API error returns a 'hold' rather than raising,
-    so a Gemini outage or malformed response can only block a trade, never
-    force one through."""
+def _parse_review(text: str) -> LLMReview:
+    text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    data = json.loads(text)
+    action = data.get("action")
+    confidence = float(data.get("confidence", 0))
+    reasoning = str(data.get("reasoning", ""))
+    if action not in ("buy", "hold"):
+        return LLMReview("hold", 0.0, f"Unrecognized action from model: {action!r}")
+    return LLMReview(action, confidence, reasoning)
+
+
+def _review_gemini(api_key: str, prompt: str) -> LLMReview:
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(_MODEL_NAME)
-        prompt = _PROMPT_TEMPLATE.format(signal_json=json.dumps(signal))
-        response = model.generate_content(prompt)
-        text = response.text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        data = json.loads(text)
-
-        action = data.get("action")
-        confidence = float(data.get("confidence", 0))
-        reasoning = str(data.get("reasoning", ""))
-
-        if action not in ("buy", "hold"):
-            return LLMReview("hold", 0.0, f"Unrecognized action from model: {action!r}")
-
-        return LLMReview(action=action, confidence=confidence, reasoning=reasoning)
+        model = genai.GenerativeModel(_GEMINI_MODEL)
+        return _parse_review(model.generate_content(prompt).text)
     except Exception as e:
-        return LLMReview(action="hold", confidence=0.0, reasoning=f"Review failed, defaulting to hold: {e}")
+        return LLMReview("hold", 0.0, f"gemini failed, defaulting to hold: {e}")
+
+
+def _review_nvidia(api_key: str, model_name: str, prompt: str) -> LLMReview:
+    try:
+        body = json.dumps({
+            "model": model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+            "max_tokens": 200,
+        }).encode()
+        req = urlrequest.Request(
+            _NVIDIA_URL, data=body,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
+        with urlrequest.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read())
+        return _parse_review(data["choices"][0]["message"]["content"])
+    except Exception as e:
+        return LLMReview("hold", 0.0, f"{model_name} failed, defaulting to hold: {e}")
+
+
+def _aggregate(votes: list[LLMReview]) -> LLMReview:
+    """Majority vote wins; a tie or non-majority defaults to hold (fails
+    safe, same as any single voter erroring out -- a split panel can only
+    block a trade, never force one)."""
+    buys = [v for v in votes if v.action == "buy"]
+    tally = "; ".join(f"{v.action}({v.confidence:.2f})" for v in votes)
+    if len(buys) * 2 <= len(votes):
+        return LLMReview("hold", 0.0, f"panel {len(buys)}/{len(votes)} buy: {tally}")
+    avg_confidence = sum(v.confidence for v in buys) / len(buys)
+    return LLMReview("buy", avg_confidence, f"panel {len(buys)}/{len(votes)} buy: {tally}")
+
+
+def review_signal(gemini_api_key: str, nvidia_api_key: str, signal: dict) -> LLMReview:
+    """Fails safe: Gemini plus every configured NVIDIA Build model votes
+    buy/hold independently (any API error counts as a hold vote); see
+    _aggregate for how the panel's votes become one decision. Pass an empty
+    nvidia_api_key to fall back to Gemini alone."""
+    prompt = _PROMPT_TEMPLATE.format(signal_json=json.dumps(signal))
+
+    jobs = [lambda: _review_gemini(gemini_api_key, prompt)]
+    if nvidia_api_key:
+        jobs += [lambda m=m: _review_nvidia(nvidia_api_key, m, prompt) for m in _NVIDIA_MODELS]
+
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        futures = [pool.submit(job) for job in jobs]
+        votes = [f.result() for f in futures]
+
+    return _aggregate(votes)

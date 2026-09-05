@@ -32,6 +32,11 @@ class OKXAdapter:
             return 0.0
         return (last - open_24h) / open_24h
 
+    def get_candles(self, inst_id: str, bar: str = "1H", limit: int = 100) -> list[float]:
+        """Closing prices, oldest to newest (OKX returns newest-first)."""
+        resp = self.market.get_candlesticks(instId=inst_id, bar=bar, limit=str(limit))
+        return [float(row[4]) for row in reversed(resp["data"])]
+
     def place_market_order(self, inst_id: str, usd_amount: float, side: str) -> dict:
         """side: 'buy' or 'sell'. Spot market order sized in quote currency (USDT) for buys."""
         sz = str(round(usd_amount, 2))
