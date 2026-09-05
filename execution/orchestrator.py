@@ -9,6 +9,9 @@ import sys
 import traceback
 from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import yfinance as yf
 
