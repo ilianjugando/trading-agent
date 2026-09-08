@@ -8,8 +8,9 @@ import json
 import sys
 import traceback
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -48,6 +49,20 @@ def _fails_indicator_confirmation(indicators: dict) -> str | None:
     return None
 
 
+def _market_is_open(now: datetime | None = None) -> bool:
+    """NYSE/Nasdaq regular hours, 9:30-16:00 America/New_York, Mon-Fri.
+    Reads the market's own clock instead of the host machine's, so
+    Task Scheduler's fixed local start time doesn't drift when the US
+    shifts for daylight saving and the host doesn't (or vice versa).
+    Doesn't account for market holidays -- worst case on a holiday is
+    the same as any other closed-market run (order queues instead of
+    filling), not a crash."""
+    now = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("America/New_York"))
+    if now.weekday() >= 5:
+        return False
+    return time(9, 30) <= now.time() < time(16, 0)
+
+
 def _log(logs_dir, filename: str, record: dict) -> None:
     logs_dir.mkdir(parents=True, exist_ok=True)
     record = {"timestamp": datetime.now(timezone.utc).isoformat(), **record}
@@ -56,6 +71,10 @@ def _log(logs_dir, filename: str, record: dict) -> None:
 
 
 def run_stocks(settings) -> None:
+    if not _market_is_open():
+        _log(settings.logs_dir, "decisions.log", {"pool": "stocks", "result": "market_closed"})
+        return
+
     guard = SpendGuard("stocks", settings.state_dir, settings.max_trade_pct, settings.daily_loss_halt_pct)
     breaker = CircuitBreaker("stocks", settings.state_dir, settings.daily_loss_halt_pct, settings.max_consecutive_losses)
     positions = PositionTracker("stocks", settings.state_dir)
