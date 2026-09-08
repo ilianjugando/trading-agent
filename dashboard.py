@@ -73,6 +73,10 @@ def build_data() -> dict:
     decisions = _tail_jsonl(LOGS_DIR / "decisions.log", 500)
     trades = _tail_jsonl(LOGS_DIR / "trades.log", 20)
     errors = [e for e in decisions if e.get("result") == "error" and "timestamp" in e and _age_minutes(e["timestamp"]) < 24 * 60]
+    # Old, already-resolved log lines (e.g. pre-fix connection errors from
+    # days ago) shouldn't pad out "recent" once today's activity is thin --
+    # that reads as something currently wrong when it's just history.
+    recent = [d for d in decisions if "timestamp" in d and _age_minutes(d["timestamp"]) < 48 * 60]
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -82,7 +86,7 @@ def build_data() -> dict:
         "spend": {p: v for p in ("stocks", "crypto") if (v := _read_json(STATE_DIR / f"spend_{p}.json"))},
         "error_count": len(errors),
         "last_error": errors[-1] if errors else None,
-        "recent_decisions": list(reversed(decisions))[:30],
+        "recent_decisions": list(reversed(recent))[:30],
         "recent_trades": list(reversed(trades)),
     }
 
