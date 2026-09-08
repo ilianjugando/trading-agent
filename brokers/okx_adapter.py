@@ -1,6 +1,8 @@
 """Thin wrapper around python-okx. flag='1' hits OKX's Demo Trading
 environment (paper mode, separate API keys); flag='0' is live.
 """
+import time
+
 from okx.Account import AccountAPI
 from okx.MarketData import MarketAPI
 from okx.Trade import TradeAPI
@@ -56,8 +58,11 @@ class OKXAdapter:
         return closes
 
     def place_market_order(self, inst_id: str, usd_amount: float, side: str) -> dict:
-        """side: 'buy' or 'sell'. Spot market order sized in quote currency (USDT) for buys."""
-        sz = str(round(usd_amount, 2))
+        """side: 'buy' or 'sell'. Spot market order sized in quote currency
+        (USDT, 2 decimals) for buys; base currency (e.g. BTC, needs finer
+        precision -- rounding a small BTC amount to 2 decimals truncates
+        it to 0 and the order is rejected) for sells."""
+        sz = str(round(usd_amount, 2)) if side == "buy" else str(round(usd_amount, 8))
         resp = self.trade.place_order(
             instId=inst_id,
             tdMode="cash",
@@ -67,10 +72,22 @@ class OKXAdapter:
             tgtCcy="quote_ccy" if side == "buy" else "base_ccy",
         )
         data = resp["data"][0]
+        if data.get("sCode") != "0":
+            raise RuntimeError(f"OKX order rejected ({data.get('sCode')}): {data.get('sMsg')}")
         return {
             "instId": inst_id,
             "side": side,
             "usd_amount": usd_amount,
             "ordId": data.get("ordId"),
-            "status": data.get("sMsg") or "submitted",
+            "status": "submitted",
         }
+
+    def get_filled_base_qty(self, inst_id: str, ord_id: str) -> float:
+        """Base-currency amount actually filled by a market order -- needed
+        because place_market_order's response doesn't include it (a buy is
+        sized in quote currency, but selling later needs the base-currency
+        amount received). Market orders fill almost immediately; a short
+        wait covers that without polling."""
+        time.sleep(1)
+        resp = self.trade.get_order(instId=inst_id, ordId=ord_id)
+        return float(resp["data"][0]["accFillSz"])
