@@ -17,8 +17,14 @@ _NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 _NVIDIA_MODELS = [
     "meta/llama-3.1-70b-instruct",
     "mistralai/mixtral-8x22b-instruct-v0.1",
-    "deepseek-ai/deepseek-r1",
+    "deepseek-ai/deepseek-v4-pro-0813",
 ]
+
+# Reasoning models that emit chain-of-thought by default need it turned off,
+# or their response isn't the bare JSON _parse_review expects.
+_NVIDIA_EXTRA_BODY = {
+    "deepseek-ai/deepseek-v4-pro-0813": {"chat_template_kwargs": {"thinking": False}},
+}
 
 _PROMPT_TEMPLATE = """You are a trading signal reviewer, not a trader. You do not place orders.
 Given this numeric momentum signal, decide whether it's worth proposing a small BUY.
@@ -65,6 +71,7 @@ def _review_nvidia(api_key: str, model_name: str, prompt: str) -> LLMReview:
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
             "max_tokens": 200,
+            **_NVIDIA_EXTRA_BODY.get(model_name, {}),
         }).encode()
         req = urlrequest.Request(
             _NVIDIA_URL, data=body,
