@@ -69,6 +69,12 @@ in `state/positions_stocks.json` — inspect it any time to see what the
 agent thinks it's holding and where its stop sits. Run this for a while —
 days, not minutes — before trusting it with the real $150.
 
+Or skip reading raw JSON and run `python dashboard.py`, then open
+http://127.0.0.1:8787 — a local read-only page showing pool health (with
+a staleness warning if a scheduled run stopped firing), circuit breaker
+status, and recent decisions/trades. Polls every 5s; doesn't run on a
+schedule, start it manually when you want to look.
+
 ## 5. Schedule it (Windows Task Scheduler)
 
 One run does one pass and exits, so scheduling repetition is Task
