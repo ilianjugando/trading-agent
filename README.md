@@ -24,8 +24,11 @@ Edit `.env`:
   extra models (Llama, Mixtral, DeepSeek) alongside Gemini for the trade
   review vote — majority wins, ties/no-majority default to hold. Leave blank
   to use Gemini alone.
-- `OKX_DEMO_*` — create Demo Trading API keys at OKX (toggle "Demo Trading" in
-  the API management page before generating them; separate from live keys)
+- `OKX_DEMO_*` — create Demo Trading API keys at OKX. These are **not** a
+  toggle on the normal API Management page — go to Trade > Demo Trading,
+  find Personal Center *inside* that section, then Demo Trading API >
+  Create Demo Trading API Key. Keys made this way are inherently
+  demo-scoped, separate from your live account's keys.
 - `OKX_*` — live API keys, only needed once you're ready for `--mode live`
 - IBKR vars usually don't need changes unless you run IB Gateway on a
   non-default port
