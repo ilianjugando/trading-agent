@@ -13,6 +13,7 @@ Binds to 127.0.0.1 only, and serves exactly two routes (no directory
 listing) -- it reads .env's own directory but never serves .env itself.
 """
 import json
+import webbrowser
 from datetime import datetime, time, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -286,7 +287,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     server = HTTPServer(("127.0.0.1", PORT), Handler)
-    print(f"Dashboard: http://127.0.0.1:{PORT}  (Ctrl+C to stop)")
+    print(f"Dashboard: http://127.0.0.1:{PORT}  (Ctrl+C to stop, or just close this window)")
+    webbrowser.open(f"http://127.0.0.1:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
