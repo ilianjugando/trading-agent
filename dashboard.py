@@ -14,6 +14,7 @@ listing) -- it reads .env's own directory but never serves .env itself.
 """
 import json
 import webbrowser
+from dataclasses import asdict
 from datetime import datetime, time, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -69,6 +70,26 @@ def _pool_health(decisions: list[dict], pool: str) -> dict:
     return {"last_result": last.get("result"), "last_timestamp": last["timestamp"], "age_minutes": round(age, 1), "stale": stale}
 
 
+def _standings() -> list[dict]:
+    """Tournament table, or an empty list if it hasn't been created yet --
+    the dashboard must open fine on a machine that has never run the
+    orchestrator."""
+    try:
+        from execution.tournament import standings
+        return [asdict(s) for s in standings(STATE_DIR / "tournament.db")]
+    except Exception:
+        return []
+
+
+def _last_scan() -> dict | None:
+    """The most recent tournament bookkeeping line, so the page can show
+    how wide the last scan actually looked."""
+    for entry in reversed(_tail_jsonl(LOGS_DIR / "decisions.log", 500)):
+        if entry.get("result") == "tournament":
+            return entry
+    return None
+
+
 def build_data() -> dict:
     decisions = _tail_jsonl(LOGS_DIR / "decisions.log", 500)
     trades = _tail_jsonl(LOGS_DIR / "trades.log", 20)
@@ -77,6 +98,8 @@ def build_data() -> dict:
     # days ago) shouldn't pad out "recent" once today's activity is thin --
     # that reads as something currently wrong when it's just history.
     recent = [d for d in decisions if "timestamp" in d and _age_minutes(d["timestamp"]) < 48 * 60]
+    # Bookkeeping lines are for the scan widget, not the decision feed.
+    feed = [d for d in recent if d.get("result") != "tournament"]
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -84,9 +107,11 @@ def build_data() -> dict:
         "positions": {p: v for p in ("stocks", "crypto") if (v := _read_json(STATE_DIR / f"positions_{p}.json"))},
         "breakers": {p: v for p in ("stocks", "crypto") if (v := _read_json(STATE_DIR / f"breaker_{p}.json"))},
         "spend": {p: v for p in ("stocks", "crypto") if (v := _read_json(STATE_DIR / f"spend_{p}.json"))},
+        "standings": _standings(),
+        "last_scan": _last_scan(),
         "error_count": len(errors),
         "last_error": errors[-1] if errors else None,
-        "recent_decisions": list(reversed(recent))[:30],
+        "recent_decisions": list(reversed(feed))[:30],
         "recent_trades": list(reversed(trades)),
     }
 
@@ -195,7 +220,7 @@ _HTML = """<!doctype html>
   .chart-head h2 { font-size: 13px; font-weight: 600; margin: 0; }
   .chart-head .now { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
   .chart-head .now b { color: var(--fg); font-weight: 600; }
-  svg.rsi-chart { width: 100%; height: 120px; display: block; }
+  svg.rsi-chart { width: 100%; height: auto; display: block; }
   .rsi-chart .grid-line { stroke: var(--border); stroke-width: 1; }
   .rsi-chart .axis-label { fill: var(--muted); font-family: var(--font-mono); font-size: 9px; }
   .rsi-chart .area { fill: var(--accent-soft); }
@@ -234,8 +259,50 @@ _HTML = """<!doctype html>
   .errors-card summary::-webkit-details-marker { display: none; }
   .errors-card pre { white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: 11px; color: var(--fg); margin: 0 0 14px; max-height: 300px; overflow-y: auto; opacity: 0.85; }
 
+  /* Status strip: health is a one-line fact, not two cards' worth of space. */
+  .status-strip { display: flex; gap: 6px 20px; align-items: center; flex-wrap: wrap; }
+  .status-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; }
+  .status-item .who { color: var(--muted); }
+  .status-item .when { font-family: var(--font-mono); color: var(--muted); font-size: 11.5px; }
+  .status-item .led { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .status-item .led.ok { background: var(--accent); }
+  .status-item .led.warn { background: var(--warn); }
+  .status-item .led.bad { background: var(--bad); }
+
+  .money { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .money-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .money-card .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+  .money-card .figure { font-family: var(--font-mono); font-size: 22px; font-weight: 500; margin-top: 5px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .money-card .figure.muted { color: var(--muted); }
+  .money-card .sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .money-card .sub.bad { color: var(--bad); }
+
+  /* Leaderboard: the point of the page. Grid rather than a real table --
+     the return bar needs a flexible track beside fixed numeric columns. */
+  .board { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .board-scroll { overflow-x: auto; }
+  .board-row {
+    display: grid; grid-template-columns: 1.4fr 76px 76px 88px minmax(120px, 1.6fr);
+    gap: 14px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); min-width: 560px;
+  }
+  .board-row:last-of-type { border-bottom: none; }
+  .board-head { background: var(--card-2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
+  .board-row .name { font-weight: 600; font-size: 13px; }
+  .board-row .name small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; margin-top: 1px; }
+  .board-row .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12.5px; text-align: right; }
+  .board-row .num.pos { color: var(--accent); }
+  .board-row .num.neg { color: var(--bad); }
+  .board-row .num.pending { color: var(--muted); }
+  .bar-track { height: 8px; background: var(--card-2); border-radius: 4px; position: relative; overflow: hidden; }
+  .bar-fill { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+  .bar-fill.pos { background: var(--accent); }
+  .bar-fill.neg { background: var(--bad); }
+  .bar-zero { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--border); }
+  .board-note { padding: 12px 16px; font-size: 12px; color: var(--muted); background: var(--card-2); border-top: 1px solid var(--border); }
+
   @media (max-width: 480px) {
     table { min-width: 520px; }
+    .money-card .figure { font-size: 19px; }
   }
 </style>
 </head>
@@ -245,22 +312,23 @@ _HTML = """<!doctype html>
     <span class="pulse-ring" aria-hidden="true"></span>
     <h1>Trading Agent</h1>
   </div>
-  <span class="updated" id="clock" role="status" aria-live="polite">&mdash;</span>
+  <div class="status-strip" id="status-strip" role="status" aria-live="polite"></div>
+  <span class="updated" id="clock">&mdash;</span>
 </header>
 
-<section aria-label="Estado de los pools">
-  <p class="section-label">Estado en vivo</p>
-  <div class="pools" id="pool-cards">
-    <div class="pool-card skel skel-card" aria-hidden="true"></div>
-    <div class="pool-card skel skel-card" aria-hidden="true"></div>
+<section aria-label="Estado de las cuentas">
+  <p class="section-label">Cuentas &middot; modo papel</p>
+  <div class="money" id="money-cards">
+    <div class="money-card skel skel-card" aria-hidden="true"></div>
+    <div class="money-card skel skel-card" aria-hidden="true"></div>
+    <div class="money-card skel skel-card" aria-hidden="true"></div>
   </div>
 </section>
 
-<section aria-label="Circuit breakers">
-  <p class="section-label">Circuit breakers</p>
-  <div class="breakers" id="breaker-cards">
-    <div class="breaker-card skel skel-card" aria-hidden="true"></div>
-    <div class="breaker-card skel skel-card" aria-hidden="true"></div>
+<section aria-label="Torneo de estrategias">
+  <p class="section-label">Qu&eacute; estrategia va ganando</p>
+  <div id="board-wrap">
+    <div class="skel skel-card" aria-hidden="true"></div>
   </div>
 </section>
 
@@ -319,40 +387,109 @@ function stateIcon(state) {
   return state === "ok" ? ICONS.check : state === "warn" ? ICONS.warning : ICONS.xcircle;
 }
 
-function poolCard(pool, h, allDecisions) {
-  const state = h.last_timestamp === null ? "bad" : h.stale ? "warn" : "ok";
-  const chipText = h.last_timestamp === null ? "sin corridas" : h.stale ? "atrasado" : "al d\\u00eda";
-  const own = allDecisions.filter(d => d.pool === pool || d.pool === "both").slice(0, 10).reverse();
-  const pad = Math.max(0, 10 - own.length);
-  const ticks = "<span class=\\"tick\\"></span>".repeat(pad) +
-    own.map(d => `<span class="tick ${tickClass(d.result)}" title="${d.result}"></span>`).join("");
-  return `
-    <article class="pool-card" data-state="${state}">
-      <div class="pool-head">
-        <h2>${POOL_LABELS[pool]}</h2>
-        <span class="chip ${state}">${stateIcon(state)}${chipText}</span>
-      </div>
-      <div class="pool-meta">
-        <span class="age">${ICONS.clock} ${fmtAge(h.age_minutes)}</span>
-        <span class="result">${h.last_result ?? "\\u2014"}</span>
-      </div>
-      <div class="ticks" role="img" aria-label="\\u00daltimas ${own.length} corridas: ${own.map(d => d.result).join(', ') || 'sin datos'}">${ticks}</div>
-    </article>`;
+function statusStrip(d) {
+  const items = ["stocks", "crypto"].map(pool => {
+    const h = d.pools[pool];
+    const state = h.last_timestamp === null ? "bad" : h.stale ? "warn" : "ok";
+    return `<span class="status-item">
+      <span class="led ${state}" aria-hidden="true"></span>
+      <span class="who">${POOL_LABELS[pool]}</span>
+      <span class="when">${fmtAge(h.age_minutes)} \\u00b7 ${h.last_result ?? "\\u2014"}</span>
+    </span>`;
+  });
+
+  if (d.last_scan) {
+    items.push(`<span class="status-item">
+      <span class="who">\\u00faltimo escaneo</span>
+      <span class="when">${d.last_scan.scanned} pares \\u00b7 ${d.last_scan.proposed} propuestas</span>
+    </span>`);
+  }
+  return items.join("");
 }
 
-function breakerCard(label, b) {
-  const halted = b && b.halted;
-  const state = halted ? "bad" : "ok";
+function moneyCards(d) {
+  const cards = [];
+
+  for (const pool of ["crypto", "stocks"]) {
+    const b = d.breakers[pool];
+    const positions = d.positions[pool] || {};
+    const held = Object.keys(positions).length;
+    const halted = b && b.halted;
+    cards.push(`
+      <article class="money-card">
+        <div class="label">${POOL_LABELS[pool]}</div>
+        <div class="figure${b ? "" : " muted"}">${b ? "$" + b.day_start_value.toFixed(2) : "\\u2014"}</div>
+        <div class="sub${halted ? " bad" : ""}">
+          ${halted ? "DETENIDO: " + (b.halt_reason ?? "") : `valor al inicio del d\\u00eda \\u00b7 ${held} posici\\u00f3n${held === 1 ? "" : "es"} abierta${held === 1 ? "" : "s"}`}
+        </div>
+      </article>`);
+  }
+
+  const totalLosses = ["crypto", "stocks"]
+    .map(p => (d.breakers[p] ? d.breakers[p].consecutive_losses : 0))
+    .reduce((a, b) => a + b, 0);
+  const anyHalted = ["crypto", "stocks"].some(p => d.breakers[p] && d.breakers[p].halted);
+  cards.push(`
+    <article class="money-card">
+      <div class="label">Protecciones</div>
+      <div class="figure${anyHalted ? "" : " muted"}">${anyHalted ? "detenido" : "activas"}</div>
+      <div class="sub">${totalLosses} p\\u00e9rdida${totalLosses === 1 ? "" : "s"} seguida${totalLosses === 1 ? "" : "s"} \\u00b7 l\\u00edmite de gasto y corta-circuitos operando</div>
+    </article>`);
+
+  return cards.join("");
+}
+
+const STRATEGY_BLURB = {
+  momentum: "compra lo que ya viene subiendo",
+  mean_reversion: "compra lo castigado, apostando al rebote",
+  trend_follow: "compra tendencias ya establecidas",
+  breakout: "compra la ruptura de un techo reciente",
+};
+
+function leaderboard(rows) {
+  if (!rows.length) {
+    return `<div class="board"><div class="empty">El torneo todav\\u00eda no registr\\u00f3 propuestas. Corr\\u00e9 el orchestrator para empezar a juntar datos.</div></div>`;
+  }
+
+  // Bars are scaled against the largest absolute return on the board, so
+  // the comparison between strategies stays honest at any magnitude.
+  const maxAbs = Math.max(0.001, ...rows.map(r => Math.abs(r.avg_return_pct ?? 0)));
+  const anyScored = rows.some(r => r.scored > 0);
+
+  const body = rows.map(r => {
+    const v = r.avg_return_pct;
+    const pending = v === null || v === undefined;
+    const width = pending ? 0 : Math.abs(v) / maxAbs * 50;
+    const bar = pending
+      ? `<span class="num pending">esperando</span>`
+      : `<div class="bar-track" role="img" aria-label="retorno promedio ${v.toFixed(2)}%">
+           <div class="bar-zero" style="left:50%"></div>
+           <div class="bar-fill ${v >= 0 ? "pos" : "neg"}" style="${v >= 0 ? `left:50%;width:${width}%` : `right:50%;width:${width}%`}"></div>
+         </div>`;
+    return `
+      <div class="board-row">
+        <div class="name">${r.strategy}<small>${STRATEGY_BLURB[r.strategy] ?? ""}</small></div>
+        <div class="num">${r.open_proposals}</div>
+        <div class="num">${r.scored}</div>
+        <div class="num ${pending ? "pending" : v >= 0 ? "pos" : "neg"}">${pending ? "\\u2014" : (v >= 0 ? "+" : "") + v.toFixed(2) + "%"}</div>
+        ${bar}
+      </div>`;
+  }).join("");
+
+  const note = anyScored
+    ? "Cada propuesta se cierra contra el precio real 24h despu\\u00e9s. 'Cerradas' es lo \\u00fanico que da confianza: con menos de ~30 resultados, el promedio todav\\u00eda es ruido."
+    : "Ninguna propuesta cumpli\\u00f3 todav\\u00eda sus 24h. Los primeros resultados aparecen ma\\u00f1ana; la tabla se vuelve informativa reci\\u00e9n con varias decenas.";
+
   return `
-    <article class="breaker-card">
-      <div class="breaker-head">
-        <h3>${label}</h3>
-        <span class="chip ${state}">${stateIcon(state)}${halted ? "detenido" : "operando"}</span>
+    <div class="board">
+      <div class="board-scroll">
+        <div class="board-row board-head">
+          <div>Estrategia</div><div class="num">Abiertas</div><div class="num">Cerradas</div><div class="num">Promedio</div><div>Rendimiento</div>
+        </div>
+        ${body}
       </div>
-      ${halted ? `<div class="kv"><span class="k">Motivo</span><span class="v">${b.halt_reason ?? "\\u2014"}</span></div>` : ""}
-      <div class="kv"><span class="k">P\\u00e9rdidas seguidas</span><span class="v">${b ? b.consecutive_losses : "\\u2014"}</span></div>
-      <div class="kv"><span class="k">Valor inicio del d\\u00eda</span><span class="v">${b ? "$" + b.day_start_value.toFixed(2) : "\\u2014"}</span></div>
-    </article>`;
+      <p class="board-note">${note}</p>
+    </div>`;
 }
 
 function resultChip(result) {
@@ -362,7 +499,7 @@ function resultChip(result) {
 
 function tradeChip(status) {
   const s = (status || "").toLowerCase();
-  const cls = (s.includes("fail") || s.includes("reject") || s.includes("cancel")) ? "bad" : "ok";
+  const cls = ["fail", "reject", "cancel", "error"].some(w => s.includes(w)) ? "bad" : "ok";
   return `<span class="result-chip ${cls}">${status || "\\u2014"}</span>`;
 }
 
@@ -420,8 +557,8 @@ function rsiChart(allDecisions) {
   // Scale to the data's own range (with headroom), not a fixed 0-100:
   // real RSI readings cluster in a narrow band, and a forced 0-100 axis
   // flattens them into a straight line against the top edge.
-  const W = 600, H = 120;
-  const PAD_L = 30, PAD_R = 8, PAD_T = 10, PAD_B = 18;
+  const W = 1200, H = 130;
+  const PAD_L = 34, PAD_R = 10, PAD_T = 12, PAD_B = 20;
   const lo = Math.max(0, Math.min(...pts, 80) - 6);
   const hi = Math.min(100, Math.max(...pts, 80) + 6);
   const x = i => PAD_L + (i / (pts.length - 1)) * (W - PAD_L - PAD_R);
@@ -463,15 +600,9 @@ async function refresh() {
   const d = await res.json();
 
   document.getElementById("clock").textContent = "actualizado " + new Date(d.generated_at).toLocaleTimeString();
-
-  document.getElementById("pool-cards").innerHTML =
-    poolCard("stocks", d.pools.stocks, d.recent_decisions) +
-    poolCard("crypto", d.pools.crypto, d.recent_decisions);
-
-  document.getElementById("breaker-cards").innerHTML =
-    breakerCard("Acciones", d.breakers.stocks) +
-    breakerCard("Crypto", d.breakers.crypto);
-
+  document.getElementById("status-strip").innerHTML = statusStrip(d);
+  document.getElementById("money-cards").innerHTML = moneyCards(d);
+  document.getElementById("board-wrap").innerHTML = leaderboard(d.standings);
   document.getElementById("rsi-chart-wrap").innerHTML = rsiChart(d.recent_decisions);
   document.getElementById("decisions-wrap").innerHTML = decisionsTable(d.recent_decisions);
   document.getElementById("trades-wrap").innerHTML = tradesTable(d.recent_trades);
