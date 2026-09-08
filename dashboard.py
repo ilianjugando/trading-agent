@@ -56,7 +56,7 @@ def _age_minutes(iso_timestamp: str) -> float:
 
 
 def _pool_health(decisions: list[dict], pool: str) -> dict:
-    last = next((e for e in reversed(decisions) if e.get("pool") in (pool, "both")), None)
+    last = next((e for e in reversed(decisions) if e.get("pool") in (pool, "both") and "timestamp" in e), None)
     if not last:
         return {"last_result": None, "last_timestamp": None, "age_minutes": None, "stale": True}
 
@@ -72,7 +72,7 @@ def _pool_health(decisions: list[dict], pool: str) -> dict:
 def build_data() -> dict:
     decisions = _tail_jsonl(LOGS_DIR / "decisions.log", 500)
     trades = _tail_jsonl(LOGS_DIR / "trades.log", 20)
-    errors = [e for e in decisions if e.get("result") == "error" and _age_minutes(e["timestamp"]) < 24 * 60]
+    errors = [e for e in decisions if e.get("result") == "error" and "timestamp" in e and _age_minutes(e["timestamp"]) < 24 * 60]
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
