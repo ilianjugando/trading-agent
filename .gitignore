@@ -7,3 +7,4 @@ logs/*.log
 state/*.json
 graphify-out/
 backtests/
+state/*.db

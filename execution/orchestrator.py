@@ -19,6 +19,7 @@ import yfinance as yf
 from brokers.ibkr_adapter import IBKRAdapter
 from brokers.okx_adapter import OKXAdapter
 from config.settings import load_settings
+from execution import tournament
 from execution.positions import PositionTracker
 from risk.circuit_breaker import CircuitBreaker, TradingHalted
 from risk.spend_guard import SpendGuard, SpendLimitError
@@ -162,6 +163,32 @@ def run_crypto(settings) -> None:
     breaker.check(pool_value)
 
     universe = liquid_crypto_universe(okx, top_n=settings.crypto_universe_size)
+
+    # One fetch of daily history for the whole universe, reused by both the
+    # tournament and the live indicator check below.
+    closes_by_symbol = {}
+    for inst_id in universe:
+        try:
+            closes_by_symbol[inst_id] = okx.get_candles(inst_id, bar="1D", limit=100)
+        except Exception:
+            continue
+
+    # Shadow tournament: settle what's come due, then record what every
+    # strategy would buy right now. Places no orders -- this is the
+    # evidence layer that will eventually say which method to trust.
+    tournament_db = settings.state_dir / "tournament.db"
+    try:
+        settled = tournament.score_due(tournament_db, okx.get_last_price)
+        proposed = tournament.record_universe(tournament_db, "crypto", closes_by_symbol)
+        _log(settings.logs_dir, "decisions.log", {
+            "pool": "crypto", "result": "tournament", "settled": settled,
+            "proposed": proposed, "scanned": len(closes_by_symbol),
+        })
+    except Exception as e:
+        # The tournament is observational -- it must never be able to stop
+        # the live path from running.
+        _log(settings.logs_dir, "decisions.log", {"pool": "crypto", "result": "tournament_error", "reason": str(e)})
+
     ranked = rank_crypto(okx, universe=universe, min_change_pct=settings.crypto_min_change_pct)
     if not ranked:
         _log(settings.logs_dir, "decisions.log", {
@@ -176,7 +203,7 @@ def run_crypto(settings) -> None:
     # covers 14 hours and pins near 90 on any slow grind up -- observed
     # ETH at RSI 85.6 (1H) vs 52.4 (1D) at the same instant, which made
     # the panel reject every candidate as "overbought" forever.
-    closes = okx.get_candles(top.inst_id, bar="1D", limit=100)
+    closes = closes_by_symbol.get(top.inst_id) or okx.get_candles(top.inst_id, bar="1D", limit=100)
     indicators = _indicator_confirmation(closes)
     signal_payload = {**asdict(top), "indicators": indicators}
     if settings.enable_kronos_forecast:
