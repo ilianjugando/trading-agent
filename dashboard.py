@@ -195,12 +195,13 @@ _HTML = """<!doctype html>
   .chart-head h2 { font-size: 13px; font-weight: 600; margin: 0; }
   .chart-head .now { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
   .chart-head .now b { color: var(--fg); font-weight: 600; }
-  svg.rsi-chart { width: 100%; height: 92px; display: block; overflow: visible; }
+  svg.rsi-chart { width: 100%; height: 120px; display: block; }
   .rsi-chart .grid-line { stroke: var(--border); stroke-width: 1; }
-  .rsi-chart .zone-label { fill: var(--muted); font-family: var(--font-mono); font-size: 9px; }
+  .rsi-chart .axis-label { fill: var(--muted); font-family: var(--font-mono); font-size: 9px; }
   .rsi-chart .area { fill: var(--accent-soft); }
   .rsi-chart .line { fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; }
   .rsi-chart .overbought { fill: var(--bad-soft); }
+  .rsi-chart .zone-line { stroke: var(--bad); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
   .rsi-chart .dot-last { fill: var(--accent); }
 
   .table-scroll { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
@@ -416,26 +417,44 @@ function rsiChart(allDecisions) {
     return `<div class="empty">Todav\\u00eda no hay suficientes lecturas de RSI para graficar.</div>`;
   }
 
-  const W = 600, H = 92, PAD = 4;
-  const x = i => PAD + (i / (pts.length - 1)) * (W - PAD * 2);
-  const y = v => H - PAD - (Math.min(100, Math.max(0, v)) / 100) * (H - PAD * 2);
+  // Scale to the data's own range (with headroom), not a fixed 0-100:
+  // real RSI readings cluster in a narrow band, and a forced 0-100 axis
+  // flattens them into a straight line against the top edge.
+  const W = 600, H = 120;
+  const PAD_L = 30, PAD_R = 8, PAD_T = 10, PAD_B = 18;
+  const lo = Math.max(0, Math.min(...pts, 80) - 6);
+  const hi = Math.min(100, Math.max(...pts, 80) + 6);
+  const x = i => PAD_L + (i / (pts.length - 1)) * (W - PAD_L - PAD_R);
+  const y = v => PAD_T + (1 - (Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * (H - PAD_T - PAD_B);
+
   const linePath = pts.map((v, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
-  const areaPath = `${linePath} L ${x(pts.length - 1).toFixed(1)} ${H - PAD} L ${x(0).toFixed(1)} ${H - PAD} Z`;
-  const overboughtY = y(80);
+  const areaPath = `${linePath} L ${x(pts.length - 1).toFixed(1)} ${(H - PAD_B).toFixed(1)} L ${x(0).toFixed(1)} ${(H - PAD_B).toFixed(1)} Z`;
   const last = pts[pts.length - 1];
+  const overboughtY = y(80);
+  const showOverbought = 80 >= lo && 80 <= hi;
+
+  // Y ticks at the range ends plus the 80 line when it's in view, so
+  // every label names a value the chart actually reaches.
+  const ticks = [lo, hi].map(v => `
+      <line x1="${PAD_L}" y1="${y(v).toFixed(1)}" x2="${W - PAD_R}" y2="${y(v).toFixed(1)}" class="grid-line"></line>
+      <text x="${PAD_L - 5}" y="${(y(v) + 3).toFixed(1)}" text-anchor="end" class="axis-label">${v.toFixed(0)}</text>`).join("");
 
   return `
     <div class="chart-head">
       <h2>RSI(14) &mdash; \\u00faltimas ${pts.length} corridas de crypto</h2>
-      <span class="now">actual: <b>${last.toFixed(1)}</b>${last >= 80 ? " (sobrecompra)" : ""}</span>
+      <span class="now">actual: <b>${last.toFixed(1)}</b>${last >= 80 ? " \\u00b7 sobrecompra" : last <= 30 ? " \\u00b7 sobreventa" : " \\u00b7 neutral"}</span>
     </div>
-    <svg class="rsi-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="RSI reciente, valor actual ${last.toFixed(1)}, ver tabla de decisiones para el detalle completo">
-      <rect x="0" y="0" width="${W}" height="${Math.max(0, overboughtY)}" class="overbought"></rect>
-      <line x1="0" y1="${overboughtY.toFixed(1)}" x2="${W}" y2="${overboughtY.toFixed(1)}" class="grid-line" stroke-dasharray="3,3"></line>
-      <text x="${W - 4}" y="${Math.max(10, overboughtY - 4)}" text-anchor="end" class="zone-label">80 sobrecompra</text>
+    <svg class="rsi-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="RSI de las \\u00faltimas ${pts.length} corridas de crypto, entre ${Math.min(...pts).toFixed(1)} y ${Math.max(...pts).toFixed(1)}, actual ${last.toFixed(1)}. El detalle por corrida est\\u00e1 en la tabla de decisiones.">
+      ${ticks}
+      ${showOverbought ? `
+      <rect x="${PAD_L}" y="${PAD_T}" width="${W - PAD_L - PAD_R}" height="${Math.max(0, overboughtY - PAD_T).toFixed(1)}" class="overbought"></rect>
+      <line x1="${PAD_L}" y1="${overboughtY.toFixed(1)}" x2="${W - PAD_R}" y2="${overboughtY.toFixed(1)}" class="zone-line"></line>
+      <text x="${PAD_L - 5}" y="${(overboughtY + 3).toFixed(1)}" text-anchor="end" class="axis-label">80</text>` : ""}
       <path d="${areaPath}" class="area"></path>
       <path d="${linePath}" class="line"></path>
-      <circle cx="${x(pts.length - 1).toFixed(1)}" cy="${y(last).toFixed(1)}" r="3" class="dot-last"></circle>
+      <circle cx="${x(pts.length - 1).toFixed(1)}" cy="${y(last).toFixed(1)}" r="3.5" class="dot-last"></circle>
+      <text x="${PAD_L}" y="${H - 5}" class="axis-label">m\\u00e1s antiguo</text>
+      <text x="${W - PAD_R}" y="${H - 5}" text-anchor="end" class="axis-label">ahora</text>
     </svg>`;
 }
 

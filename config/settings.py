@@ -30,6 +30,9 @@ class Settings:
     require_indicator_confirmation: bool
     enable_kronos_forecast: bool
 
+    crypto_universe_size: int
+    crypto_min_change_pct: float
+
     state_dir: Path
     logs_dir: Path
 
@@ -61,6 +64,8 @@ def load_settings() -> Settings:
         max_consecutive_losses=int(os.environ.get("MAX_CONSECUTIVE_LOSSES", 3)),
         require_indicator_confirmation=os.environ.get("REQUIRE_INDICATOR_CONFIRMATION", "false").lower() in ("1", "true", "yes"),
         enable_kronos_forecast=os.environ.get("ENABLE_KRONOS_FORECAST", "false").lower() in ("1", "true", "yes"),
+        crypto_universe_size=int(os.environ.get("CRYPTO_UNIVERSE_SIZE", 25)),
+        crypto_min_change_pct=float(os.environ.get("CRYPTO_MIN_CHANGE_PCT", 3.0)),
         state_dir=ROOT_DIR / "state",
         logs_dir=ROOT_DIR / "logs",
     )

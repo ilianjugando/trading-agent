@@ -22,6 +22,7 @@ from config.settings import load_settings
 from execution.positions import PositionTracker
 from risk.circuit_breaker import CircuitBreaker, TradingHalted
 from risk.spend_guard import SpendGuard, SpendLimitError
+from signals.crypto_trend import liquid_universe as liquid_crypto_universe
 from signals.crypto_trend import rank_universe as rank_crypto
 from signals.darvas import compute_box, scan_for_breakouts
 from signals.indicators import rsi, sma_trend, volatility_regime
@@ -160,13 +161,22 @@ def run_crypto(settings) -> None:
     pool_value = okx.get_usdt_balance()
     breaker.check(pool_value)
 
-    ranked = rank_crypto(okx)
+    universe = liquid_crypto_universe(okx, top_n=settings.crypto_universe_size)
+    ranked = rank_crypto(okx, universe=universe, min_change_pct=settings.crypto_min_change_pct)
     if not ranked:
-        _log(settings.logs_dir, "decisions.log", {"pool": "crypto", "result": "no_signals"})
+        _log(settings.logs_dir, "decisions.log", {
+            "pool": "crypto", "result": "no_signals",
+            "scanned": len(universe), "min_change_pct": settings.crypto_min_change_pct,
+        })
         return
 
     top = ranked[0]
-    closes = okx.get_candles(top.inst_id)
+    # Daily bars: the strategy ranks on 24h momentum, so the confirming
+    # indicators have to read the same horizon. On hourly bars RSI(14)
+    # covers 14 hours and pins near 90 on any slow grind up -- observed
+    # ETH at RSI 85.6 (1H) vs 52.4 (1D) at the same instant, which made
+    # the panel reject every candidate as "overbought" forever.
+    closes = okx.get_candles(top.inst_id, bar="1D", limit=100)
     indicators = _indicator_confirmation(closes)
     signal_payload = {**asdict(top), "indicators": indicators}
     if settings.enable_kronos_forecast:

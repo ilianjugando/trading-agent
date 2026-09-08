@@ -26,6 +26,26 @@ class OKXAdapter:
         resp = self.market.get_ticker(instId=inst_id)
         return float(resp["data"][0]["last"])
 
+    def get_spot_tickers(self) -> list[dict]:
+        """Every USDT spot ticker in one call, each with `inst_id`,
+        `volume_24h_usd` and `change_24h_pct`. Used to build the scan
+        universe from live liquidity instead of a hardcoded list."""
+        resp = self.market.get_tickers(instType="SPOT")
+        out = []
+        for row in resp["data"]:
+            if not row["instId"].endswith("-USDT"):
+                continue
+            open_24h = float(row.get("open24h") or 0)
+            last = float(row.get("last") or 0)
+            if open_24h <= 0:
+                continue
+            out.append({
+                "inst_id": row["instId"],
+                "volume_24h_usd": float(row.get("volCcy24h") or 0),
+                "change_24h_pct": (last - open_24h) / open_24h,
+            })
+        return out
+
     def get_24h_change_pct(self, inst_id: str) -> float:
         resp = self.market.get_ticker(instId=inst_id)
         d = resp["data"][0]
