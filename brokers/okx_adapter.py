@@ -37,6 +37,24 @@ class OKXAdapter:
         resp = self.market.get_candlesticks(instId=inst_id, bar=bar, limit=str(limit))
         return [float(row[4]) for row in reversed(resp["data"])]
 
+    def get_history_candles(self, inst_id: str, bar: str = "1H", days: int = 30) -> list[float]:
+        """Like get_candles, but pages OKX's history-candles endpoint
+        (100 rows/call) backwards to reach further back than the ~4 days
+        get_candles's single call covers. Closing prices, oldest to
+        newest. Only used by the backtest tools -- the live orchestrator
+        path (get_candles) is untouched."""
+        bars_needed = days * (24 if "H" in bar else 1)
+        closes: list[float] = []
+        after = ""
+        while len(closes) < bars_needed:
+            resp = self.market.get_history_candlesticks(instId=inst_id, bar=bar, limit="100", after=after)
+            rows = resp["data"]
+            if not rows:
+                break
+            closes = [float(row[4]) for row in reversed(rows)] + closes
+            after = rows[-1][0]
+        return closes
+
     def place_market_order(self, inst_id: str, usd_amount: float, side: str) -> dict:
         """side: 'buy' or 'sell'. Spot market order sized in quote currency (USDT) for buys."""
         sz = str(round(usd_amount, 2))

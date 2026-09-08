@@ -6,3 +6,4 @@ venv/
 logs/*.log
 state/*.json
 graphify-out/
+backtests/
