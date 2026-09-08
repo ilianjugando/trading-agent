@@ -1,0 +1,8 @@
+# Only needed if ENABLE_KRONOS_FORECAST=true in .env. Separate from
+# requirements.txt so a normal install never pulls torch.
+#   pip install -r requirements-kronos.txt
+torch>=2.0.0
+huggingface_hub>=0.33.1
+safetensors>=0.6.2
+einops>=0.8.1
+tqdm>=4.67.1

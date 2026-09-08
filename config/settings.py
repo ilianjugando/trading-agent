@@ -28,6 +28,7 @@ class Settings:
     daily_loss_halt_pct: float
     max_consecutive_losses: int
     require_indicator_confirmation: bool
+    enable_kronos_forecast: bool
 
     state_dir: Path
     logs_dir: Path
@@ -59,6 +60,7 @@ def load_settings() -> Settings:
         daily_loss_halt_pct=float(os.environ.get("DAILY_LOSS_HALT_PCT", 0.10)),
         max_consecutive_losses=int(os.environ.get("MAX_CONSECUTIVE_LOSSES", 3)),
         require_indicator_confirmation=os.environ.get("REQUIRE_INDICATOR_CONFIRMATION", "false").lower() in ("1", "true", "yes"),
+        enable_kronos_forecast=os.environ.get("ENABLE_KRONOS_FORECAST", "false").lower() in ("1", "true", "yes"),
         state_dir=ROOT_DIR / "state",
         logs_dir=ROOT_DIR / "logs",
     )

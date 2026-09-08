@@ -3,6 +3,7 @@ environment (paper mode, separate API keys); flag='0' is live.
 """
 import time
 
+import pandas as pd
 from okx.Account import AccountAPI
 from okx.MarketData import MarketAPI
 from okx.Trade import TradeAPI
@@ -56,6 +57,27 @@ class OKXAdapter:
             closes = [float(row[4]) for row in reversed(rows)] + closes
             after = rows[-1][0]
         return closes
+
+    def get_candles_ohlcv(self, inst_id: str, bar: str = "1H", limit: int = 300) -> pd.DataFrame:
+        """Full OHLCV history (lowercase columns, DatetimeIndex, oldest to
+        newest) -- only used by the optional Kronos forecast signal.
+        get_candles() (closes-only, used by the live indicators path and
+        the backtest) is untouched."""
+        rows: list[list[str]] = []
+        after = ""
+        while len(rows) < limit:
+            resp = self.market.get_history_candlesticks(instId=inst_id, bar=bar, limit="100", after=after)
+            batch = resp["data"]
+            if not batch:
+                break
+            rows = list(reversed(batch)) + rows
+            after = batch[-1][0]
+
+        rows = rows[-limit:]
+        df = pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close", "vol", "volCcy", "volCcyQuote", "confirm"])
+        df[["open", "high", "low", "close"]] = df[["open", "high", "low", "close"]].astype(float)
+        df.index = pd.to_datetime(df["ts"].astype("int64"), unit="ms")
+        return df[["open", "high", "low", "close"]]
 
     def place_market_order(self, inst_id: str, usd_amount: float, side: str) -> dict:
         """side: 'buy' or 'sell'. Spot market order sized in quote currency

@@ -25,6 +25,7 @@ from risk.spend_guard import SpendGuard, SpendLimitError
 from signals.crypto_trend import rank_universe as rank_crypto
 from signals.darvas import compute_box, scan_for_breakouts
 from signals.indicators import rsi, sma_trend, volatility_regime
+from signals.kronos_forecast import forecast as kronos_forecast
 from signals.llm_review import review_signal
 
 
@@ -114,9 +115,13 @@ def run_stocks(settings) -> None:
             return
 
         top = candidates[0]
-        closes = yf.Ticker(top.symbol).history(period="3mo")["Close"].tolist()
-        indicators = _indicator_confirmation(closes)
+        hist = yf.Ticker(top.symbol).history(period="3mo")
+        indicators = _indicator_confirmation(hist["Close"].tolist())
         signal_payload = {**asdict(top), "indicators": indicators}
+        if settings.enable_kronos_forecast:
+            kf = kronos_forecast(hist)
+            if kf is not None:
+                signal_payload["kronos_forecast"] = asdict(kf)
         review = review_signal(settings.gemini_api_key, settings.nvidia_api_key, signal_payload)
         decision_record = {"pool": "stocks", "signal": signal_payload, "review": asdict(review)}
 
@@ -164,6 +169,10 @@ def run_crypto(settings) -> None:
     closes = okx.get_candles(top.inst_id)
     indicators = _indicator_confirmation(closes)
     signal_payload = {**asdict(top), "indicators": indicators}
+    if settings.enable_kronos_forecast:
+        kf = kronos_forecast(okx.get_candles_ohlcv(top.inst_id))
+        if kf is not None:
+            signal_payload["kronos_forecast"] = asdict(kf)
     review = review_signal(settings.gemini_api_key, settings.nvidia_api_key, signal_payload)
     decision_record = {"pool": "crypto", "signal": signal_payload, "review": asdict(review)}
 
