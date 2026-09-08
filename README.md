@@ -33,10 +33,14 @@ Edit `.env`:
 ## 2. Install IB Gateway (required for the stocks side)
 
 Download IB Gateway (lighter than full TWS) from Interactive Brokers, log
-into your **paper trading** account first, and leave it running. Paper port
-is 7497 by default — confirm under Gateway settings > API > Settings.
-Live account uses port 7496. The orchestrator connects to whichever port
-matches `--mode`.
+into your **paper trading** account first (a separate username IBKR
+provisions for you — Client Portal > Settings > Paper Trading Account
+shows it, account numbers start with `DU`), and leave it running. Paper
+port is 4002 by default in Gateway — confirm under Configure > Settings >
+API > Settings. Live account uses port 4001. (These differ from TWS's
+7497/7496 — Gateway and TWS use different port conventions even for the
+same account type.) The orchestrator connects to whichever port matches
+`--mode`.
 
 ## 3. Run tests
 
