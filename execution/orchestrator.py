@@ -197,14 +197,35 @@ def run_crypto(settings) -> None:
         })
         return
 
-    top = ranked[0]
-    # Daily bars: the strategy ranks on 24h momentum, so the confirming
-    # indicators have to read the same horizon. On hourly bars RSI(14)
-    # covers 14 hours and pins near 90 on any slow grind up -- observed
-    # ETH at RSI 85.6 (1H) vs 52.4 (1D) at the same instant, which made
-    # the panel reject every candidate as "overbought" forever.
-    closes = closes_by_symbol.get(top.inst_id) or okx.get_candles(top.inst_id, bar="1D", limit=100)
-    indicators = _indicator_confirmation(closes)
+    # Real data (171 panel votes, 0 buys) showed the single biggest 24h
+    # mover is almost always already overbought -- avg RSI 60, Kronos
+    # forecasting a reversal 79% of the time. "Biggest mover across the
+    # whole universe" is nearly tautologically the most extended one on
+    # any given day, so always taking ranked[0] meant only ever showing
+    # the panel the single worst-timed entry. Walk down the ranked list
+    # instead and offer the strongest mover that ISN'T already extended --
+    # still momentum, just not the most blown-out instance of it.
+    top = indicators = closes = None
+    for candidate in ranked:
+        candidate_closes = closes_by_symbol.get(candidate.inst_id)
+        if candidate_closes is None:
+            continue
+        candidate_indicators = _indicator_confirmation(candidate_closes)
+        if candidate_indicators["rsi_14"] is not None and candidate_indicators["rsi_14"] >= 70:
+            continue  # still extended -- try the next-strongest mover
+        top, indicators, closes = candidate, candidate_indicators, candidate_closes
+        break
+
+    if top is None:
+        _log(settings.logs_dir, "decisions.log", {
+            "pool": "crypto", "result": "no_signals",
+            "reason": f"all {len(ranked)} candidate(s) already overbought (RSI>=70)",
+        })
+        return
+    # closes/indicators already computed in the RSI-walk loop above (daily
+    # bars, matching the 24h horizon the strategy ranks on -- see the note
+    # there on why 1H bars pinned RSI near 90 and made everything look
+    # overbought regardless of what was actually selected).
     signal_payload = {**asdict(top), "indicators": indicators}
     if settings.enable_kronos_forecast:
         kf = kronos_forecast(okx.get_candles_ohlcv(top.inst_id))
