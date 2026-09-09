@@ -12,8 +12,13 @@ import google.generativeai as genai
 
 # "latest" alias, not a dated snapshot -- gemini-2.5-flash was retired to
 # existing users only (404) partway through this project; an alias that
-# Google keeps pointed at their current flash model avoids repeating this.
-_GEMINI_MODEL = "gemini-flash-latest"
+# Google keeps pointed at their current model avoids repeating this.
+# Specifically the "lite" line, not plain "-flash-latest": that resolved
+# to gemini-3.8-flash, whose free tier is a mere 20 requests/day -- far
+# too low for a panel called every 15min (confirmed via a live 429:
+# "limit: 20, model: gemini-3.8-flash"). Lite models get a much more
+# generous free daily quota.
+_GEMINI_MODEL = "gemini-flash-lite-latest"
 
 # One NVIDIA Build API key gives access to all of these (https://build.nvidia.com),
 # but "listed in the catalog" != "entitled to this account" -- meta/llama-3.1-70b-instruct,
