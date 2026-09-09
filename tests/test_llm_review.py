@@ -12,9 +12,15 @@ def test_majority_buy_wins():
     assert result.confidence == 0.7  # average of the two buy votes
 
 
-def test_tie_defaults_to_hold():
+def test_single_buy_wins_even_against_a_hold():
+    # Any one buy vote wins -- not a majority (changed 2026-09-09: real
+    # data showed a >=2/3 majority rule was vetoing candidates that had
+    # already cleared the RSI-overbought filter on ordinary model
+    # disagreement, not on genuine risk signal).
     votes = [LLMReview("buy", 0.9, "a"), LLMReview("hold", 0.0, "b")]
-    assert _aggregate(votes).action == "hold"
+    result = _aggregate(votes)
+    assert result.action == "buy"
+    assert result.confidence == 0.9
 
 
 def test_all_hold():
