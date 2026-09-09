@@ -10,20 +10,29 @@ from urllib import request as urlrequest
 
 import google.generativeai as genai
 
-_GEMINI_MODEL = "gemini-2.5-flash"
+# "latest" alias, not a dated snapshot -- gemini-2.5-flash was retired to
+# existing users only (404) partway through this project; an alias that
+# Google keeps pointed at their current flash model avoids repeating this.
+_GEMINI_MODEL = "gemini-flash-latest"
 
-# One NVIDIA Build API key gives access to all of these (https://build.nvidia.com).
+# One NVIDIA Build API key gives access to all of these (https://build.nvidia.com),
+# but "listed in the catalog" != "entitled to this account" -- meta/llama-3.1-70b-instruct,
+# mistralai/mixtral-8x22b-instruct-v0.1, and deepseek-ai/deepseek-v4-pro-0813 (used
+# previously) all started 404/410ing without warning; every model here was verified live
+# against this account before being added, not picked from the catalog by name alone.
 _NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 _NVIDIA_MODELS = [
-    "meta/llama-3.1-70b-instruct",
-    "mistralai/mixtral-8x22b-instruct-v0.1",
-    "deepseek-ai/deepseek-v4-pro-0813",
+    "nvidia/nemotron-3-super-120b-a12b",
+    "openai/gpt-oss-20b",
 ]
 
-# Reasoning models that emit chain-of-thought by default need it turned off,
-# or their response isn't the bare JSON _parse_review expects.
+# Reasoning models emit chain-of-thought (a separate reasoning_content field)
+# before the actual answer -- at the old max_tokens=200 that alone could exhaust
+# the budget and leave `content` truncated/empty. Where the model honors a
+# thinking-off toggle, use it (cheaper, faster, and removes the truncation risk
+# outright); max_tokens below is raised regardless as a second line of defense.
 _NVIDIA_EXTRA_BODY = {
-    "deepseek-ai/deepseek-v4-pro-0813": {"chat_template_kwargs": {"thinking": False}},
+    "nvidia/nemotron-3-super-120b-a12b": {"chat_template_kwargs": {"thinking": False}},
 }
 
 _PROMPT_TEMPLATE = """You are a trading signal reviewer, not a trader. You do not place orders.
@@ -70,7 +79,7 @@ def _review_nvidia(api_key: str, model_name: str, prompt: str) -> LLMReview:
             "model": model_name,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
-            "max_tokens": 200,
+            "max_tokens": 500,
             **_NVIDIA_EXTRA_BODY.get(model_name, {}),
         }).encode()
         req = urlrequest.Request(
