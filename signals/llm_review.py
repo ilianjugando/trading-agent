@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from urllib import request as urlrequest
 
-import google.generativeai as genai
+from google import genai
 
 # "latest" alias, not a dated snapshot -- gemini-2.5-flash was retired to
 # existing users only (404) partway through this project; an alias that
@@ -109,9 +109,9 @@ def _parse_review(text: str) -> LLMReview:
 
 def _review_gemini(api_key: str, prompt: str) -> LLMReview:
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(_GEMINI_MODEL)
-        return _parse_review(model.generate_content(prompt).text)
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(model=_GEMINI_MODEL, contents=prompt)
+        return _parse_review(response.text)
     except Exception as e:
         return LLMReview("hold", 0.0, f"gemini failed, defaulting to hold: {e}", errored=True)
 
