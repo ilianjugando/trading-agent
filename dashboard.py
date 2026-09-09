@@ -81,6 +81,18 @@ def _standings() -> list[dict]:
         return []
 
 
+def _panel_sentiment(decisions: list[dict], pool: str = "crypto", window: int = 50) -> dict | None:
+    """Share of recent panel votes that said buy, from real decision
+    history -- never fabricated. None once there's nothing to compute
+    yet (a fresh install, or a pool that hasn't run)."""
+    reviews = [d["review"]["action"] for d in decisions if d.get("pool") == pool and "review" in d]
+    reviews = reviews[-window:]
+    if not reviews:
+        return None
+    buys = sum(1 for a in reviews if a == "buy")
+    return {"buy_pct": round(buys / len(reviews) * 100, 1), "sample": len(reviews)}
+
+
 def _last_scan() -> dict | None:
     """The most recent tournament bookkeeping line, so the page can show
     how wide the last scan actually looked."""
@@ -109,6 +121,7 @@ def build_data() -> dict:
         "spend": {p: v for p in ("stocks", "crypto") if (v := _read_json(STATE_DIR / f"spend_{p}.json"))},
         "standings": _standings(),
         "last_scan": _last_scan(),
+        "panel_sentiment": _panel_sentiment(decisions),
         "error_count": len(errors),
         "last_error": errors[-1] if errors else None,
         "recent_decisions": list(reversed(feed))[:30],
@@ -127,7 +140,11 @@ _HTML = """<!doctype html>
   :root {
     --bg: #020617; --card: #0e1223; --card-2: #141a30; --border: #334155;
     --fg: #f8fafc; --muted: #94a3b8;
+    /* --accent is the P&L color: green = gaining, and reused for "healthy"
+       status. --glow is a separate identity color (console/system-alive),
+       never used for a financial value, so the two meanings never collide. */
     --accent: #22c55e; --accent-soft: rgba(34,197,94,0.15); --on-accent: #06210f;
+    --glow: #22d3ee; --glow-soft: rgba(34,211,238,0.14);
     --warn: #f59e0b; --warn-soft: rgba(245,158,11,0.15);
     --bad: #ef4444; --bad-soft: rgba(239,68,68,0.15);
     --font-body: 'Fira Sans', -apple-system, 'Segoe UI', sans-serif;
@@ -138,6 +155,7 @@ _HTML = """<!doctype html>
       --bg: #f8fafc; --card: #ffffff; --card-2: #eef2f7; --border: #dbe2ea;
       --fg: #0f172a; --muted: #64748b;
       --accent: #16a34a; --accent-soft: rgba(22,163,74,0.12); --on-accent: #ffffff;
+      --glow: #0891b2; --glow-soft: rgba(8,145,178,0.10);
       --warn: #b45309; --warn-soft: rgba(180,83,9,0.12);
       --bad: #dc2626; --bad-soft: rgba(220,38,38,0.12);
     }
@@ -146,6 +164,7 @@ _HTML = """<!doctype html>
     --bg: #f8fafc; --card: #ffffff; --card-2: #eef2f7; --border: #dbe2ea;
     --fg: #0f172a; --muted: #64748b;
     --accent: #16a34a; --accent-soft: rgba(22,163,74,0.12); --on-accent: #ffffff;
+    --glow: #0891b2; --glow-soft: rgba(8,145,178,0.10);
     --warn: #b45309; --warn-soft: rgba(180,83,9,0.12);
     --bad: #dc2626; --bad-soft: rgba(220,38,38,0.12);
   }
@@ -168,16 +187,23 @@ _HTML = """<!doctype html>
   }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand .pulse-ring { position: relative; width: 10px; height: 10px; flex: none; }
-  .brand .pulse-ring::before, .brand .pulse-ring::after {
-    content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--accent);
+  .brand .pulse-ring::before {
+    content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--glow);
+    box-shadow: 0 0 6px 1px var(--glow);
   }
-  .brand .pulse-ring::after { animation: pulse-ring 2.2s ease-out infinite; }
+  .brand .pulse-ring::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--glow);
+    animation: pulse-ring 2.2s ease-out infinite;
+  }
   @media (prefers-reduced-motion: reduce) { .brand .pulse-ring::after { animation: none; opacity: 0; } }
   @keyframes pulse-ring {
     0% { transform: scale(1); opacity: 0.55; }
     100% { transform: scale(2.6); opacity: 0; }
   }
-  h1 { font-weight: 700; font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+  h1 {
+    font-weight: 700; font-size: 18px; margin: 0; letter-spacing: -0.01em;
+    text-shadow: 0 0 18px var(--glow-soft);
+  }
   .updated { color: var(--muted); font-family: var(--font-mono); font-size: 12px; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
 
   section { margin-bottom: 24px; }
@@ -215,11 +241,26 @@ _HTML = """<!doctype html>
   .kv .k { color: var(--muted); }
   .kv .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
+  .momentum-row { display: grid; grid-template-columns: 2.2fr 1fr; gap: 12px; align-items: stretch; }
+  @media (max-width: 700px) { .momentum-row { grid-template-columns: 1fr; } }
+
   .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
   .chart-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; gap: 10px; flex-wrap: wrap; }
   .chart-head h2 { font-size: 13px; font-weight: 600; margin: 0; }
   .chart-head .now { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
   .chart-head .now b { color: var(--fg); font-weight: 600; }
+
+  .gauge-card { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 2px; }
+  .gauge-card h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; align-self: flex-start; }
+  .gauge-ring { position: relative; width: 108px; height: 108px; }
+  .gauge-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .gauge-ring .track { fill: none; stroke: var(--card-2); stroke-width: 9; }
+  .gauge-ring .fill { fill: none; stroke: var(--glow); stroke-width: 9; stroke-linecap: round; filter: drop-shadow(0 0 4px var(--glow-soft)); transition: stroke-dasharray 0.4s ease; }
+  .gauge-ring .figure {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  .gauge-card .sub { font-size: 11.5px; color: var(--muted); margin-top: 8px; }
   svg.rsi-chart { width: 100%; height: auto; display: block; }
   .rsi-chart .grid-line { stroke: var(--border); stroke-width: 1; }
   .rsi-chart .axis-label { fill: var(--muted); font-family: var(--font-mono); font-size: 9px; }
@@ -286,7 +327,7 @@ _HTML = """<!doctype html>
     gap: 14px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); min-width: 560px;
   }
   .board-row:last-of-type { border-bottom: none; }
-  .board-head { background: var(--card-2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
+  .board-head { background: var(--card-2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; box-shadow: inset 0 2px 0 var(--glow-soft); }
   .board-row .name { font-weight: 600; font-size: 13px; }
   .board-row .name small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; margin-top: 1px; }
   .board-row .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12.5px; text-align: right; }
@@ -332,9 +373,12 @@ _HTML = """<!doctype html>
   </div>
 </section>
 
-<section aria-label="Momentum RSI reciente (crypto)">
+<section aria-label="Momentum y sentimiento del panel">
   <p class="section-label">Momentum &middot; RSI(14) reciente, crypto</p>
-  <div class="chart-card" id="rsi-chart-wrap"></div>
+  <div class="momentum-row">
+    <div class="chart-card" id="rsi-chart-wrap"></div>
+    <div class="chart-card gauge-card" id="sentiment-gauge-wrap"></div>
+  </div>
 </section>
 
 <section aria-label="Decisiones recientes">
@@ -595,6 +639,25 @@ function rsiChart(allDecisions) {
     </svg>`;
 }
 
+function sentimentGauge(s) {
+  if (!s) {
+    return `<h2>Sentimiento del panel</h2><div class="empty" style="padding:10px 0">Sin datos todav\\u00eda</div>`;
+  }
+  const r = 40, c = 2 * Math.PI * r;
+  const frac = s.buy_pct / 100;
+  const mood = s.buy_pct >= 60 ? "alcista" : s.buy_pct <= 15 ? "muy cauto" : "cauto";
+  return `
+    <h2>Sentimiento del panel</h2>
+    <div class="gauge-ring" role="img" aria-label="${s.buy_pct}% de los votos del panel fueron compra, sobre las \\u00faltimas ${s.sample} decisiones de crypto">
+      <svg viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="${r}" class="track"></circle>
+        <circle cx="50" cy="50" r="${r}" class="fill" stroke-dasharray="${(frac * c).toFixed(1)} ${c.toFixed(1)}"></circle>
+      </svg>
+      <span class="figure">${s.buy_pct}%</span>
+    </div>
+    <p class="sub">votos de compra \\u00b7 \\u00faltimas ${s.sample} decisiones \\u00b7 ${mood}</p>`;
+}
+
 async function refresh() {
   const res = await fetch("/data");
   const d = await res.json();
@@ -604,6 +667,7 @@ async function refresh() {
   document.getElementById("money-cards").innerHTML = moneyCards(d);
   document.getElementById("board-wrap").innerHTML = leaderboard(d.standings);
   document.getElementById("rsi-chart-wrap").innerHTML = rsiChart(d.recent_decisions);
+  document.getElementById("sentiment-gauge-wrap").innerHTML = sentimentGauge(d.panel_sentiment);
   document.getElementById("decisions-wrap").innerHTML = decisionsTable(d.recent_decisions);
   document.getElementById("trades-wrap").innerHTML = tradesTable(d.recent_trades);
 
