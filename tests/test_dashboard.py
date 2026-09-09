@@ -159,3 +159,61 @@ def test_build_data_is_json_serializable_on_a_fresh_install(tmp_path, monkeypatc
     assert data["portfolio"]["total_capital"] is None
     assert data["performance"]["available"] is False
     assert data["live_positions"] == []
+
+
+def test_task_statuses_reports_error_string_instead_of_raising(monkeypatch):
+    """Si schtasks no esta disponible o el nombre no existe, el dashboard
+    tiene que poder seguir abriendo -- nunca tirar una excepcion por esto."""
+    def fake_run(*args, **kwargs):
+        raise FileNotFoundError("schtasks no encontrado")
+    monkeypatch.setattr(dashboard.subprocess, "run", fake_run)
+
+    statuses = dashboard._task_statuses()
+    assert set(statuses.keys()) == set(dashboard._BOT_TASKS)
+    assert all(v.startswith("error:") for v in statuses.values())
+
+
+def test_task_statuses_parses_the_real_schtasks_output_shape(monkeypatch):
+    class FakeResult:
+        stdout = "TaskName:      \TradingAgentPaper\nStatus:        Ready\n"
+        stderr = ""
+    monkeypatch.setattr(dashboard.subprocess, "run", lambda *a, **k: FakeResult())
+
+    statuses = dashboard._task_statuses()
+    assert all(v == "Ready" for v in statuses.values())
+
+
+def test_set_tasks_enabled_is_best_effort_per_task(monkeypatch):
+    """Una tarea que falla no debe impedir que se intenten las demas, y el
+    resultado tiene que decir exactamente cual fallo y cual no."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if "TradingAgentCrypto" in cmd:
+            raise dashboard.subprocess.CalledProcessError(1, cmd)
+        class Ok:
+            pass
+        return Ok()
+
+    monkeypatch.setattr(dashboard.subprocess, "run", fake_run)
+    results = dashboard._set_tasks_enabled(True)
+
+    assert results["TradingAgentPaper"] == "ok"
+    assert results["TradingAgentCrypto"].startswith("error:")
+    assert results["TradingAgentWatchlist"] == "ok"
+    assert len(calls) == 3
+    assert all("/ENABLE" in c for c in calls)
+
+
+def test_set_tasks_enabled_disable_uses_the_disable_flag(monkeypatch):
+    calls = []
+    monkeypatch.setattr(dashboard.subprocess, "run", lambda cmd, **k: calls.append(cmd))
+    dashboard._set_tasks_enabled(False)
+    assert all("/DISABLE" in c for c in calls)
+
+
+def test_bot_tasks_list_is_never_derived_from_request_input():
+    """El endpoint no acepta nombre de tarea por parametro -- la lista es
+    fija en el codigo. Esto es lo que hace seguro exponerlo por HTTP."""
+    assert dashboard._BOT_TASKS == ["TradingAgentPaper", "TradingAgentCrypto", "TradingAgentWatchlist"]

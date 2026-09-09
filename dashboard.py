@@ -1,4 +1,6 @@
-"""Local, read-only dashboard for watching the orchestrator between runs.
+"""Local dashboard for watching the orchestrator between runs, plus a
+minimal start/stop control for the three scheduled tasks that actually
+run it (TradingAgentPaper, TradingAgentCrypto, TradingAgentWatchlist).
 
 Run manually when you want to look -- this does NOT run on a schedule
 and is never started automatically:
@@ -9,10 +11,14 @@ Then open http://127.0.0.1:8787 in a browser. It polls its own /data
 endpoint every 5s (the orchestrator only ticks every 30-60min, so that's
 more than enough granularity -- no websockets needed).
 
-Binds to 127.0.0.1 only, and serves exactly two routes (no directory
-listing) -- it reads .env's own directory but never serves .env itself.
+Binds to 127.0.0.1 only -- it reads .env's own directory but never
+serves .env itself. Start/stop is real process control (it runs
+`schtasks`), not a trading decision: it can only pause or resume the
+scheduled ticks, never place, size, or override a trade. The task names
+it's allowed to touch are a fixed list, never taken from the request.
 """
 import json
+import subprocess
 import webbrowser
 from dataclasses import asdict
 from datetime import datetime, time, timezone
@@ -23,6 +29,10 @@ ROOT = Path(__file__).resolve().parent
 LOGS_DIR = ROOT / "logs"
 STATE_DIR = ROOT / "state"
 PORT = 8787
+
+# The only tasks start/stop is allowed to touch -- never derived from the
+# HTTP request, so there is no way to point this at an arbitrary task name.
+_BOT_TASKS = ["TradingAgentPaper", "TradingAgentCrypto", "TradingAgentWatchlist"]
 
 # The scheduled task's outer window (see Task Scheduler "TradingAgentPaper").
 # Used only to avoid flagging stocks as "stale" outside its firing window.
@@ -582,6 +592,21 @@ _HTML = """<!doctype html>
   }
   .updated { color: var(--muted); font-family: var(--font-mono); font-size: 12px; white-space: nowrap; }
 
+  /* ---------- bot start/stop control ---------- */
+  .bot-control { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+  .bot-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+  .bot-dot.on { background: var(--accent); box-shadow: 0 0 6px 1px var(--accent); }
+  .bot-dot.off { background: var(--bad); }
+  .bot-dot.mixed { background: var(--warn); box-shadow: 0 0 6px 1px var(--warn); }
+  .btn {
+    padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--card-2);
+    color: var(--fg); font-weight: 600; font-size: 12px;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--glow); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn-start { border-color: var(--accent); color: var(--accent); }
+  .btn-stop { border-color: var(--bad); color: var(--bad); }
+
   /* ---------- tab bar ---------- */
   .tabbar {
     display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--border);
@@ -778,6 +803,12 @@ _HTML = """<!doctype html>
   <div class="brand">
     <span class="pulse-ring" aria-hidden="true"></span>
     <h1>Trading Agent · Command Center</h1>
+  </div>
+  <div class="bot-control" id="bot-control">
+    <span class="bot-dot" id="bot-dot" aria-hidden="true"></span>
+    <span id="bot-status-text">verificando&hellip;</span>
+    <button id="bot-start-btn" class="btn btn-start" hidden>Iniciar</button>
+    <button id="bot-stop-btn" class="btn btn-stop" hidden>Detener</button>
   </div>
   <span class="updated" id="clock">&mdash;</span>
 </header>
@@ -1418,6 +1449,68 @@ function renderRoute() {
   state.renderedSig = state.sig;
 }
 
+// Estado del boton mientras hay una accion en curso, para no pisarlo con
+// el resultado de un poll de estado que llega mientras tanto.
+let botActionInFlight = false;
+
+function applyBotStatus(tasks) {
+  if (botActionInFlight) return;
+  const dot = document.getElementById("bot-dot");
+  const text = document.getElementById("bot-status-text");
+  const startBtn = document.getElementById("bot-start-btn");
+  const stopBtn = document.getElementById("bot-stop-btn");
+  const values = Object.values(tasks || {});
+  if (!values.length) {
+    dot.className = "bot-dot";
+    text.textContent = "estado desconocido";
+    startBtn.hidden = stopBtn.hidden = true;
+    return;
+  }
+  const allOn = values.every(v => v === "Ready" || v === "Running");
+  const allOff = values.every(v => v === "Disabled");
+  dot.className = "bot-dot " + (allOn ? "on" : allOff ? "off" : "mixed");
+  text.textContent = allOn ? "Bot activo" : allOff ? "Bot detenido" : "Estado mixto";
+  startBtn.hidden = allOn;
+  stopBtn.hidden = allOff;
+}
+
+async function fetchBotStatus() {
+  try {
+    const res = await fetch("/bot-status");
+    const d = await res.json();
+    applyBotStatus(d.tasks);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function botAction(action, confirmMsg) {
+  if (!confirm(confirmMsg)) return;
+  botActionInFlight = true;
+  const startBtn = document.getElementById("bot-start-btn");
+  const stopBtn = document.getElementById("bot-stop-btn");
+  const text = document.getElementById("bot-status-text");
+  startBtn.disabled = stopBtn.disabled = true;
+  text.textContent = action === "start" ? "Iniciando\\u2026" : "Deteniendo\\u2026";
+  try {
+    const res = await fetch("/bot-" + action, { method: "POST" });
+    const d = await res.json();
+    botActionInFlight = false;
+    applyBotStatus(d.tasks);
+  } catch (err) {
+    console.error(err);
+    text.textContent = "Error -- ver consola";
+  } finally {
+    botActionInFlight = false;
+    startBtn.disabled = stopBtn.disabled = false;
+  }
+}
+
+document.getElementById("bot-start-btn").addEventListener("click", () =>
+  botAction("start", "\\u00bfIniciar el bot? Reactiva las 3 tareas programadas (acciones, crypto, watchlist)."));
+document.getElementById("bot-stop-btn").addEventListener("click", () =>
+  botAction("stop", "\\u00bfDetener el bot? Pausa las 3 tareas programadas hasta que lo reinicies."));
+
 async function refresh() {
   let d;
   try {
@@ -1433,6 +1526,7 @@ async function refresh() {
   state.sig = JSON.stringify(rest);
   document.getElementById("clock").textContent = "actualizado " + new Date(d.generated_at).toLocaleTimeString("es-AR");
   renderRoute();
+  fetchBotStatus();
 }
 
 window.addEventListener("hashchange", renderRoute);
@@ -1442,6 +1536,47 @@ setInterval(refresh, 5000);
 </body>
 </html>
 """
+
+
+def _task_statuses() -> dict:
+    """Real state of each scheduled task, read from Task Scheduler itself
+    -- never inferred from decisions.log, which only tells you when a task
+    last fired, not whether it's currently enabled to fire again."""
+    statuses = {}
+    for name in _BOT_TASKS:
+        try:
+            result = subprocess.run(
+                ["schtasks", "/Query", "/TN", name, "/FO", "LIST"],
+                capture_output=True, text=True, timeout=10,
+            )
+            status = next(
+                (line.split(":", 1)[1].strip() for line in result.stdout.splitlines()
+                 if line.startswith("Status:")),
+                None,
+            )
+            statuses[name] = status or f"error: {result.stderr.strip() or 'tarea no encontrada'}"
+        except Exception as e:
+            statuses[name] = f"error: {e}"
+    return statuses
+
+
+def _set_tasks_enabled(enabled: bool) -> dict:
+    """Enables or disables every task in _BOT_TASKS. Best-effort per task --
+    one failing must not stop the others from being tried, and the caller
+    gets back exactly what happened to each one instead of a single
+    pass/fail for the whole batch."""
+    flag = "/ENABLE" if enabled else "/DISABLE"
+    results = {}
+    for name in _BOT_TASKS:
+        try:
+            subprocess.run(
+                ["schtasks", "/Change", "/TN", name, flag],
+                capture_output=True, text=True, timeout=10, check=True,
+            )
+            results[name] = "ok"
+        except Exception as e:
+            results[name] = f"error: {e}"
+    return results
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1460,6 +1595,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, "text/html; charset=utf-8", _HTML.encode("utf-8"))
         elif self.path == "/data":
             self._send(200, "application/json", json.dumps(build_data()).encode("utf-8"))
+        elif self.path == "/bot-status":
+            self._send(200, "application/json", json.dumps({"tasks": _task_statuses()}).encode("utf-8"))
+        else:
+            self._send(404, "text/plain", b"not found")
+
+    def do_POST(self):
+        if self.path == "/bot-start":
+            self._send(200, "application/json", json.dumps({"tasks": _set_tasks_enabled(True)}).encode("utf-8"))
+        elif self.path == "/bot-stop":
+            self._send(200, "application/json", json.dumps({"tasks": _set_tasks_enabled(False)}).encode("utf-8"))
         else:
             self._send(404, "text/plain", b"not found")
 
