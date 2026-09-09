@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 venv/
 logs/*.log
+logs/*.jsonl
 state/*.json
 graphify-out/
 backtests/
