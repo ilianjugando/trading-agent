@@ -85,8 +85,16 @@ trades 24/7 but `run_stocks()` gates itself on real NYSE hours
 - **`TradingAgentPaper`** — `--pool stocks`, daily, repeat every 30min,
   window wide enough to cover both US daylight-saving states (the code's
   own market-hours check is the real gate, not this window)
-- **`TradingAgentCrypto`** — `--pool crypto`, daily, repeat every 60min,
-  ~24h window
+- **`TradingAgentCrypto`** — `--pool crypto`, daily, repeat every 15min,
+  ~24h window. Deliberately faster than stocks: the 24h-change ranking
+  is computed from a live ticker (moves within the hour), unlike the
+  RSI/SMA confirmation indicators which read daily bars and are the
+  same value all day regardless of scan frequency -- there's no
+  benefit to polling those any faster than once a day, but there is a
+  real benefit to catching a fresh mover sooner rather than waiting up
+  to an hour. 15min is fast enough to matter without meaningfully
+  increasing OKX/LLM API call volume (still well under both providers'
+  rate limits).
 
 For either: Task Scheduler > Create Task > Action "Start a program",
 Program `C:\Users\ivasc\trading-agent\.venv\Scripts\python.exe`,
