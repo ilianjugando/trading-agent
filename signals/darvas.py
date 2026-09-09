@@ -17,7 +17,7 @@ from dataclasses import dataclass
 import pandas as pd
 import yfinance as yf
 
-from config.universe import ROBOTICS_BASKET
+from config.universe import resolve_stock_universe
 
 
 @dataclass
@@ -78,8 +78,14 @@ def compute_box(
     )
 
 
-def scan_for_breakouts(basket: list[str] = ROBOTICS_BASKET) -> list[DarvasBox]:
-    """Only symbols with a confirmed breakout today, strongest volume first."""
+def scan_for_breakouts(basket: list[str] | None = None) -> list[DarvasBox]:
+    """Only symbols with a confirmed breakout today, strongest volume first.
+    basket defaults to resolve_stock_universe() (the state/watchlist.json
+    override, falling back to ROBOTICS_BASKET) resolved fresh on every call
+    -- not a function-default value baked in at import time, since the
+    override file can change between scheduled runs."""
+    if basket is None:
+        basket = resolve_stock_universe()
     boxes = []
     for symbol in basket:
         try:
