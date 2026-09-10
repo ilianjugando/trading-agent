@@ -80,6 +80,18 @@ def test_bucket_classification_by_size_and_asymmetry():
     assert classify_bucket(None, reward_risk=2.0) == "momentum"
 
 
+def test_meme_coin_always_lands_in_moonshot_regardless_of_market_cap():
+    """Evidencia (SSRN 6292920): meme coins grandes por market cap
+    ("large") igual perdieron -78.74% de cartera equal-weighted en 14
+    meses. La capitalizacion no protege de un colapso narrativo, asi que
+    is_meme debe ganarle incluso a "large" con buena asimetria."""
+    assert classify_bucket("large", reward_risk=1.5, is_meme=True) == "moonshot"
+    assert classify_bucket("mid", reward_risk=2.0, is_meme=True) == "moonshot"
+    assert classify_bucket(None, reward_risk=2.0, is_meme=True) == "moonshot"
+    # Por defecto (is_meme no pasado) el comportamiento previo no cambia.
+    assert classify_bucket("large", reward_risk=1.5) == "core"
+
+
 def test_result_is_json_serializable():
     import json
     from dataclasses import asdict

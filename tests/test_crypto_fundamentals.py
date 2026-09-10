@@ -2,6 +2,7 @@ import json
 
 from signals.crypto_fundamentals import (
     fetch_market_fundamentals,
+    fetch_meme_coin_symbols,
     okx_inst_id_to_symbol,
 )
 
@@ -130,5 +131,30 @@ def test_fetch_market_fundamentals_raises_on_network_failure(monkeypatch):
     try:
         fetch_market_fundamentals()
         assert False, "expected an exception, not a silently-swallowed empty dict"
+    except TimeoutError:
+        pass
+
+
+def test_fetch_meme_coin_symbols_returns_uppercased_set(monkeypatch):
+    rows = [
+        {"symbol": "doge"},
+        {"symbol": "SHIB"},
+        {"symbol": "pepe"},
+    ]
+    _patch_market_data(monkeypatch, rows)
+
+    out = fetch_meme_coin_symbols()
+    assert out == {"DOGE", "SHIB", "PEPE"}
+
+
+def test_fetch_meme_coin_symbols_raises_on_network_failure(monkeypatch):
+    def _boom(req, timeout=20):
+        raise TimeoutError("network blew up")
+
+    monkeypatch.setattr("signals.crypto_fundamentals.urllib.request.urlopen", _boom)
+
+    try:
+        fetch_meme_coin_symbols()
+        assert False, "expected an exception, not a silently-swallowed empty set"
     except TimeoutError:
         pass

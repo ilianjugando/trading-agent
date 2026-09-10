@@ -25,7 +25,11 @@ from execution.positions import PositionTracker
 from execution.sizing import BUCKET_CAPS, classify_bucket, size_position
 from risk.circuit_breaker import CircuitBreaker, TradingHalted
 from risk.spend_guard import SpendGuard, SpendLimitError
-from signals.crypto_fundamentals import fetch_market_fundamentals, okx_inst_id_to_symbol
+from signals.crypto_fundamentals import (
+    fetch_market_fundamentals,
+    fetch_meme_coin_symbols,
+    okx_inst_id_to_symbol,
+)
 from signals.crypto_trend import liquid_universe as liquid_crypto_universe
 from signals.darvas import compute_box
 from signals.opportunity_scanner import scan
@@ -177,7 +181,8 @@ def _evaluate_candidates(settings, scan_result, pool, pool_value, held, guard, p
 
         # El bucket se decide ANTES de la revision para poder decirle al
         # panel que tamano real tendria la posicion que esta evaluando.
-        bucket = classify_bucket(candidate.metrics.get("size_bucket"), asym.reward_risk)
+        bucket = classify_bucket(candidate.metrics.get("size_bucket"), asym.reward_risk,
+                                 is_meme=bool(candidate.metrics.get("is_meme")))
         cap_pct = min(BUCKET_CAPS[bucket], settings.max_trade_pct) * 100
         position_context = (
             f"Position sizing: if approved, this becomes a '{bucket}' position of at most "
@@ -538,13 +543,27 @@ def run_crypto(settings) -> None:
             "pool": "crypto", "result": "fundamentals_error", "reason": str(e),
         })
 
+    # Ver el docstring de `is_meme` en execution/sizing.py: la
+    # capitalizacion de mercado no protege a un meme coin del mismo modo
+    # que a un activo con utilidad, asi que se marca aparte y se fuerza a
+    # moonshot sin importar que tan "large" se vea por size_bucket.
+    meme_symbols = set()
+    try:
+        meme_symbols = fetch_meme_coin_symbols()
+    except Exception as e:
+        _log(settings.logs_dir, "decisions.log", {
+            "pool": "crypto", "result": "meme_coin_fetch_error", "reason": str(e),
+        })
+
     price_data = {}
     for inst_id, closes in closes_by_symbol.items():
-        fund = fundamentals.get(okx_inst_id_to_symbol(inst_id))
+        base_symbol = okx_inst_id_to_symbol(inst_id)
+        fund = fundamentals.get(base_symbol)
         price_data[inst_id] = {
             "closes": closes,
             "size_bucket": fund.size_bucket if fund else None,
             "market_cap_usd": fund.market_cap_usd if fund else None,
+            "is_meme": base_symbol in meme_symbols,
         }
 
     scan_result = scan(price_data)

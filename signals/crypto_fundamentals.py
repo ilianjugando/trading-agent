@@ -31,6 +31,14 @@ _MARKETS_URL = (
     "?vs_currency=usd&order=market_cap_desc&per_page={per_page}&page=1"
 )
 
+# CoinGecko's own "meme-token" category, curated by them (not a hand-kept
+# list here that inevitably lags every new launch). One extra call per
+# cycle, same shape and same rate-limit caveat as _MARKETS_URL above.
+_MEME_CATEGORY_URL = (
+    "https://api.coingecko.com/api/v3/coins/markets"
+    "?vs_currency=usd&category=meme-token&order=market_cap_desc&per_page={per_page}&page=1"
+)
+
 
 @dataclass
 class CryptoFundamentals:
@@ -136,3 +144,21 @@ def fetch_market_fundamentals(per_page: int = 250) -> dict[str, CryptoFundamenta
             rank=rank,
         )
     return out
+
+
+def fetch_meme_coin_symbols(per_page: int = 250) -> set[str]:
+    """Simbolos (uppercased) de CoinGecko's "meme-token" category, top
+    `per_page` por market cap. Llamada unica, igual que
+    fetch_market_fundamentals -- nunca por simbolo en loop.
+
+    Existe para que `classify_bucket` pueda tratar un meme coin grande
+    como especulativo aunque su capitalizacion diga "large" o "core": ver
+    el docstring de `is_meme` en execution/sizing.py para la evidencia.
+    Raises igual que fetch_market_fundamentals -- el llamador atrapa y
+    loguea, no se trata como "no hay meme coins" en silencio.
+    """
+    url = _MEME_CATEGORY_URL.format(per_page=per_page)
+    req = urllib.request.Request(url, headers={"User-Agent": "trading-agent/1.0"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        rows = json.loads(resp.read().decode("utf-8"))
+    return {row["symbol"].upper() for row in rows if row.get("symbol")}

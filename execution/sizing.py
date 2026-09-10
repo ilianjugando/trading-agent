@@ -94,7 +94,7 @@ def size_position(
     )
 
 
-def classify_bucket(size_bucket: str | None, reward_risk: float | None) -> str:
+def classify_bucket(size_bucket: str | None, reward_risk: float | None, is_meme: bool = False) -> str:
     """A que bucket pertenece un candidato.
 
     `size_bucket` es la capitalizacion cuando se conoce ("large", "mid",
@@ -104,7 +104,20 @@ def classify_bucket(size_bucket: str | None, reward_risk: float | None) -> str:
     Una micro cap va a moonshot aunque la senal se vea inmejorable: el
     riesgo ahi no es la calidad de la senal sino la imposibilidad de salir
     del activo, y eso no se arregla teniendo razon.
+
+    `is_meme` fuerza moonshot ANTES de mirar la capitalizacion. Evidencia
+    (Krause, "An Empirical Analysis of Meme Coin Performance: 2025-2026",
+    SSRN 6292920): una cartera de los 10 meme coins mas grandes por market
+    cap perdio -78.74% en 14 meses con 103.82% de volatilidad anualizada,
+    incluyendo nombres que en ese periodo tuvieron capitalizacion "large"
+    (Dogecoin, $17-22B) o cercana. El riesgo de un meme coin es narrativo
+    -- depende de atencion social y puede colapsar sin que cambie ningun
+    fundamento -- y el market cap no lo cubre como lo cubre en un activo
+    con utilidad. Tratar un meme coin grande como "core" solo por su
+    capitalizacion repetiria el error que el paper documenta.
     """
+    if is_meme:
+        return "moonshot"
     if size_bucket == "micro":
         return "moonshot"
     if size_bucket == "large" and (reward_risk is None or reward_risk < 3.0):
