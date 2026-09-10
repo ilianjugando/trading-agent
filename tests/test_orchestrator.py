@@ -277,3 +277,33 @@ def test_kill_switch_does_not_block_exits(tmp_path):
     _manage_crypto_exits(_settings(tmp_path), okx, positions, _breaker(tmp_path), pool_value=1000.0)
 
     assert okx.sell_calls == [("ARB-USDT", 1000.0)], "la salida tiene que ejecutarse igual"
+
+
+def test_a_broken_pool_does_not_stop_the_other_one(tmp_path, monkeypatch):
+    """P1 visto en vivo (2026-09-10): IB Gateway rechazo la conexion y el
+    ciclo entero murio con pool 'both' -- run_crypto no llego a correr, asi
+    que las posiciones de crypto se quedaron sin gestion de salidas por la
+    caida de un broker que no tiene nada que ver con crypto."""
+    import execution.orchestrator as orch
+
+    ran = []
+
+    def _stocks_explota(settings):
+        raise ConnectionRefusedError("IB Gateway caido")
+
+    def _crypto_ok(settings):
+        ran.append("crypto")
+
+    monkeypatch.setattr(orch, "run_stocks", _stocks_explota)
+    monkeypatch.setattr(orch, "run_crypto", _crypto_ok)
+    monkeypatch.setattr(orch, "load_settings",
+                        lambda: SimpleNamespace(state_dir=tmp_path, logs_dir=tmp_path))
+    monkeypatch.setattr("sys.argv", ["orchestrator.py", "--mode", "paper", "--pool", "both"])
+
+    exit_code = orch.main()
+
+    assert ran == ["crypto"], "crypto TIENE que correr aunque stocks se caiga"
+    assert exit_code == 1, "pero el ciclo se reporta como fallido"
+
+    results = {(d.get("pool"), d.get("result")) for d in _decisions(tmp_path)}
+    assert ("stocks", "error") in results, "el error se atribuye al pool que fallo, no a 'both'"

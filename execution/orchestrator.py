@@ -472,12 +472,18 @@ def run_stocks(settings) -> None:
 
         price_data = {}
         histories = {}
+        # Un simbolo que desaparece del universo por un fallo de descarga y
+        # uno que simplemente no era interesante se veian igual: ausente.
+        # Con eso, "yfinance esta caido" era indistinguible de "no habia
+        # oportunidades" (seccion 38).
+        fetch_errors: dict[str, str] = {}
         for symbol in universe:
             if symbol in held:
                 continue
             try:
                 hist = yf.Ticker(symbol).history(period="6mo")
-            except Exception:
+            except Exception as e:
+                fetch_errors[symbol] = f"{type(e).__name__}: {e}"
                 continue
             if hist.empty or "Close" not in hist:
                 continue
@@ -500,6 +506,12 @@ def run_stocks(settings) -> None:
             extra = candidate.metrics.get("stock_strategies") or []
             candidate.strategies = list(dict.fromkeys(candidate.strategies + extra))
 
+        if fetch_errors:
+            _log(settings.logs_dir, "decisions.log", {
+                "pool": "stocks", "result": "market_data_errors",
+                "failed": len(fetch_errors), "of_universe": len(universe),
+                "symbols": dict(list(fetch_errors.items())[:20]),
+            })
         _log(settings.logs_dir, "decisions.log", {
             "pool": "stocks", "result": "scan", **scan_result.as_metrics(),
         })
@@ -597,11 +609,21 @@ def run_crypto(settings) -> None:
     # One fetch of daily history for the whole universe, reused by both the
     # tournament and the live indicator check below.
     closes_by_symbol = {}
+    candle_errors: dict[str, str] = {}
     for inst_id in universe:
         try:
             closes_by_symbol[inst_id] = okx.get_candles(inst_id, bar="1D", limit=100)
-        except Exception:
+        except Exception as e:
+            # Ver el comentario equivalente en run_stocks: sin registrar
+            # esto, "OKX esta caido" se ve igual que "no habia nada bueno".
+            candle_errors[inst_id] = f"{type(e).__name__}: {e}"
             continue
+    if candle_errors:
+        _log(settings.logs_dir, "decisions.log", {
+            "pool": "crypto", "result": "market_data_errors",
+            "failed": len(candle_errors), "of_universe": len(universe),
+            "symbols": dict(list(candle_errors.items())[:20]),
+        })
 
     # Shadow tournament: settle what's come due, then record what every
     # strategy would buy right now. Places no orders -- this is the
@@ -680,10 +702,21 @@ def main() -> int:
     os.environ["TRADING_MODE"] = args.mode
     settings = load_settings()
 
-    def _run_pool(pool: str, fn) -> None:
-        """Un ciclo por pool a la vez. Ver execution/run_lock.py: sin esto,
-        una corrida manual y una programada pueden solaparse, leer el mismo
-        estado y comprar los mismos simbolos dos veces."""
+    def _run_pool(pool: str, fn) -> bool:
+        """Un ciclo de un pool, aislado del otro. Devuelve False si fallo.
+
+        El aislamiento es el punto: antes los dos pools compartian un solo
+        try/except en main(), asi que una excepcion en run_stocks cortaba
+        la funcion entera y run_crypto NO LLEGABA A CORRER. Visto en vivo
+        (2026-09-10): IB Gateway rechazo la conexion y el ciclo entero
+        murio con `pool: "both", result: "error"` -- dejando las posiciones
+        de crypto sin gestion de salidas por una caida de un broker que no
+        tiene nada que ver con crypto. Un pool caido no puede arrastrar al
+        otro, y menos todavia a sus stop-loss.
+
+        El lock (execution/run_lock.py) impide ademas que una corrida
+        manual y una programada se solapen y compren lo mismo dos veces.
+        """
         try:
             with RunLock(pool, settings.state_dir) as lock:
                 if lock.took_over_stale_lock:
@@ -692,23 +725,29 @@ def main() -> int:
                         "reason": "habia un lock viejo de un proceso que ya no existe",
                     })
                 fn(settings)
+            return True
         except AlreadyRunning as e:
             # No es un error: es la proteccion funcionando. Se registra
             # como tal para no confundirlo con una caida.
             _log(settings.logs_dir, "decisions.log", {
                 "pool": pool, "result": "skipped_already_running", "reason": str(e),
             })
+            return True
+        except Exception:
+            # Se loguea con el nombre del pool que fallo, no con "both":
+            # saber CUAL se cayo es la mitad del diagnostico.
+            _log(settings.logs_dir, "decisions.log", {
+                "pool": pool, "result": "error", "traceback": traceback.format_exc(),
+            })
+            return False
 
-    try:
-        if args.pool in ("stocks", "both"):
-            _run_pool("stocks", run_stocks)
-        if args.pool in ("crypto", "both"):
-            _run_pool("crypto", run_crypto)
-    except Exception:
-        _log(settings.logs_dir, "decisions.log", {"pool": args.pool, "result": "error", "traceback": traceback.format_exc()})
-        return 1
+    ok = True
+    if args.pool in ("stocks", "both"):
+        ok = _run_pool("stocks", run_stocks) and ok
+    if args.pool in ("crypto", "both"):
+        ok = _run_pool("crypto", run_crypto) and ok
 
-    return 0
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
