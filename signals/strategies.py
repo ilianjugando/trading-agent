@@ -75,15 +75,25 @@ ALL_STRATEGIES = {
 }
 
 
-def evaluate_all(closes: list[float]) -> list[Proposal]:
+def evaluate_all(closes: list[float], on_error=None) -> list[Proposal]:
     """Every strategy's verdict on one symbol. Strategies that decline
     simply don't appear -- a quiet strategy is a valid outcome, and
-    forcing every one to fire on every bar is how you get noise."""
+    forcing every one to fire on every bar is how you get noise.
+
+    Una estrategia que LEVANTA una excepcion no es lo mismo que una que
+    declina, aunque el resultado inmediato se vea igual (no aparece en la
+    lista). Antes ambos casos eran indistinguibles: una estrategia rota
+    bajaba el puntaje de confluencia de todo el universo en silencio, y
+    parecia simplemente "no disparo". `on_error(nombre, excepcion)` deja
+    que el llamador lo registre; sin el, el comportamiento es el de antes.
+    """
     out = []
-    for fn in ALL_STRATEGIES.values():
+    for name, fn in ALL_STRATEGIES.items():
         try:
             proposal = fn(closes)
-        except Exception:
+        except Exception as e:
+            if on_error is not None:
+                on_error(name, e)
             continue
         if proposal is not None:
             out.append(proposal)

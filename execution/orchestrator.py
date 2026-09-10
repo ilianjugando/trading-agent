@@ -210,7 +210,11 @@ def _evaluate_candidates(settings, scan_result, pool, pool_value, held, guard, p
         decision_record = {"pool": pool, "signal": signal_payload, "review": asdict(review)}
 
         if review.action != "buy" or review.confidence < 0.6:
-            _log(settings.logs_dir, "decisions.log", {**decision_record, "result": "skipped"})
+            # "el panel evaluo y dijo que no" y "el panel no pudo evaluar"
+            # llevan al mismo resultado seguro, pero no son el mismo hecho:
+            # solo el segundo es una falla que hay que ir a arreglar.
+            result = "skipped_panel_degraded" if review.errored else "skipped"
+            _log(settings.logs_dir, "decisions.log", {**decision_record, "result": result})
             continue
 
         # La conviccion combina las dos lecturas independientes: cuanto cree

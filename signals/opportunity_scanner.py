@@ -53,6 +53,9 @@ class ScanResult:
     shortlist: list[Candidate]  # aceptados, mejor score primero
     rejected: list[Candidate]
     rejection_summary: dict[str, int]
+    # Estrategias que LEVANTARON excepcion (no las que simplemente
+    # declinaron): una rota es un bug, no una senal ausente.
+    strategy_errors: dict = field(default_factory=dict)
 
     def as_metrics(self) -> dict:
         """Las metricas del ciclo, para el log de decisiones."""
@@ -70,6 +73,7 @@ class ScanResult:
             # con el conteo agregado -- nunca con el activo puntual. Se
             # trunca a 40 por motivo para no inflar decisions.log sin limite
             # en un universo grande.
+            "strategy_errors": self.strategy_errors,
             "rejected_symbols": {
                 reason: [c.symbol for c in self.rejected if c.rejected_because == reason][:40]
                 for reason in self.rejection_summary
@@ -132,6 +136,14 @@ def scan(price_data: dict[str, dict], min_expected_value_pct: float = 0.0) -> Sc
     shortlist: list[Candidate] = []
     rejected: list[Candidate] = []
     summary: dict[str, int] = {}
+    # Una estrategia que se rompe baja el puntaje de confluencia de todo
+    # el universo sin que se note. Se cuenta por estrategia y viaja en
+    # as_metrics() hasta decisions.log, que es el unico canal visible en
+    # produccion (la tarea programada corre pythonw.exe, sin consola).
+    strategy_errors: dict[str, str] = {}
+
+    def _note_strategy_error(name, exc):
+        strategy_errors[name] = f'{type(exc).__name__}: {exc}'
 
     def reject(symbol: str, reason: str, metrics: dict | None = None) -> None:
         rejected.append(Candidate(symbol=symbol, score=0.0, asymmetry=None,
@@ -157,7 +169,7 @@ def scan(price_data: dict[str, dict], min_expected_value_pct: float = 0.0) -> Sc
             })
             continue
 
-        strategies = [p.strategy for p in evaluate_all(closes)]
+        strategies = [p.strategy for p in evaluate_all(closes, on_error=_note_strategy_error)]
         rsi_value = rsi(closes)
         trend = sma_trend(closes)
         score, breakdown = _score(asym, strategies, rsi_value, trend)
@@ -182,4 +194,5 @@ def scan(price_data: dict[str, dict], min_expected_value_pct: float = 0.0) -> Sc
         shortlist=shortlist,
         rejected=rejected,
         rejection_summary=summary,
+        strategy_errors=strategy_errors,
     )

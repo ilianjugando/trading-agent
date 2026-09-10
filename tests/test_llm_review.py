@@ -30,3 +30,33 @@ def test_all_hold():
 
 def test_single_gemini_only_buy():
     assert _aggregate([LLMReview("buy", 0.75, "a")]).action == "buy"
+
+
+def test_panel_degraded_when_most_votes_were_api_errors():
+    """Seccion 38: 'el panel evaluo y dijo que no' y 'el panel no pudo
+    evaluar' llevan al mismo resultado seguro, pero no son el mismo hecho.
+    Caso real (2026-09-10, SIG): 2 de 3 votos eran errores de API y la
+    alerta mandaba a revisar umbrales del panel."""
+    from signals.llm_review import LLMReview, _aggregate
+
+    votes = [
+        LLMReview("hold", 0.40, "juicio real"),
+        LLMReview("hold", 0.0, "api cayo", errored=True),
+        LLMReview("hold", 0.0, "api cayo", errored=True),
+    ]
+    result = _aggregate(votes)
+    assert result.action == "hold"
+    assert result.errored, "un panel mayormente caido no es un juicio del panel"
+
+
+def test_panel_not_degraded_when_votes_are_real():
+    from signals.llm_review import LLMReview, _aggregate
+
+    votes = [
+        LLMReview("hold", 0.40, "juicio real"),
+        LLMReview("hold", 0.30, "juicio real"),
+        LLMReview("hold", 0.0, "api cayo", errored=True),
+    ]
+    result = _aggregate(votes)
+    assert result.action == "hold"
+    assert not result.errored, "un solo fallo no invalida el juicio del panel"

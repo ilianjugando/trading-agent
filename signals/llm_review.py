@@ -157,10 +157,21 @@ def _aggregate(votes: list[LLMReview]) -> LLMReview:
     tally = "; ".join(f"{v.action}({v.confidence:.2f}{'!' if v.errored else ''})" for v in votes)
     error_count = sum(1 for v in votes if v.errored)
     note = f" ({error_count} fallo{'s' if error_count != 1 else ''} de API)" if error_count else ""
+    # Panel degradado: si la mayoria de los votos fueron errores de API, lo
+    # que sale de aca no es un juicio del panel, es la ausencia de uno. El
+    # resultado sigue siendo el mismo (no operar, que es el lado seguro),
+    # pero tiene que quedar distinguible: sin esto, "el panel evaluo y dijo
+    # que no" y "el panel no pudo evaluar" se veian igual, y la alerta de
+    # capital mandaba a revisar umbrales cuando la causa real era que los
+    # modelos no respondian (seccion 38).
+    degraded = error_count > len(votes) / 2
+
     if not buys:
-        return LLMReview("hold", 0.0, f"panel {len(buys)}/{len(votes)} buy{note}: {tally}")
+        return LLMReview("hold", 0.0, f"panel {len(buys)}/{len(votes)} buy{note}: {tally}",
+                         errored=degraded)
     avg_confidence = sum(v.confidence for v in buys) / len(buys)
-    return LLMReview("buy", avg_confidence, f"panel {len(buys)}/{len(votes)} buy{note}: {tally}")
+    return LLMReview("buy", avg_confidence, f"panel {len(buys)}/{len(votes)} buy{note}: {tally}",
+                     errored=degraded)
 
 
 def review_signal(gemini_api_key: str, nvidia_api_key: str, signal: dict,

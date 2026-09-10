@@ -72,6 +72,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kill-switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Kill Switch */
+        get: operations["get_kill_switch_kill_switch_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kill-switch/engage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Kill Switch Engage
+         * @description Corta la apertura de posiciones NUEVAS. Las salidas (stop-loss)
+         *     siguen ejecutandose siempre -- ver risk/kill_switch.py.
+         */
+        post: operations["post_kill_switch_engage_kill_switch_engage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kill-switch/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Kill Switch Release */
+        post: operations["post_kill_switch_release_kill_switch_release_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/market-radar": {
         parameters: {
             query?: never;
@@ -253,6 +308,28 @@ export interface components {
             suspicious: boolean;
             /** Blockchain */
             blockchain: string;
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /** KillSwitchRequest */
+        KillSwitchRequest: {
+            /** Reason */
+            reason?: string | null;
+            /** Pools */
+            pools?: string[] | null;
+        };
+        /**
+         * KillSwitchStatus
+         * @description None = ese pool puede abrir posiciones; string = motivo del corte.
+         */
+        KillSwitchStatus: {
+            /** Stocks Blocked */
+            stocks_blocked: string | null;
+            /** Crypto Blocked */
+            crypto_blocked: string | null;
         };
         /** LargestPosition */
         LargestPosition: {
@@ -476,6 +553,19 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
+        };
         /** WatchlistEntry */
         WatchlistEntry: {
             /** Symbol */
@@ -593,6 +683,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskStatusResponse"];
+                };
+            };
+        };
+    };
+    get_kill_switch_kill_switch_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitchStatus"];
+                };
+            };
+        };
+    };
+    post_kill_switch_engage_kill_switch_engage_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["KillSwitchRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitchStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_kill_switch_release_kill_switch_release_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitchStatus"];
                 };
             };
         };

@@ -107,3 +107,27 @@ def test_rejected_symbols_are_grouped_by_reason_for_drilldown():
 def test_raises_on_invalid_input_shape():
     with pytest.raises(TypeError):
         scan(["no", "es", "un", "dict"])
+
+
+def test_a_broken_strategy_is_reported_not_silently_ignored(monkeypatch):
+    """Una estrategia que se ROMPE y una que simplemente no dispara se
+    veian igual: ausente de la lista. Una rota baja el puntaje de
+    confluencia de todo el universo en silencio (auditoria 2026-09-10)."""
+    import signals.opportunity_scanner as scanner
+
+    def _explota(closes):
+        raise ZeroDivisionError("division por cero en la estrategia")
+
+    monkeypatch.setattr(scanner, "evaluate_all",
+                        lambda closes, on_error=None: (on_error("rota", ZeroDivisionError("division por cero")) or []) if on_error else [])
+
+    result = scanner.scan({"ALCISTA": {"closes": _rising()}})
+
+    assert "rota" in result.strategy_errors
+    assert "ZeroDivisionError" in result.strategy_errors["rota"]
+    assert "strategy_errors" in result.as_metrics()
+
+
+def test_no_strategy_errors_means_an_empty_dict():
+    result = scan({"ALCISTA": {"closes": _rising()}})
+    assert result.strategy_errors == {}
