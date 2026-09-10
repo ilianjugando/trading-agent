@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+/* Identidad visual heredada tal cual del dashboard.py anterior -- ya
+   estaba bien pensada (colores semanticos separados del acento de marca,
+   validado independientemente por la busqueda de ui-ux-pro-max para este
+   tipo de producto) y no hay razon para reinventarla en la migracion.
+
+   Oscuro por defecto (terminal financiero), con el mismo contrato de tres
+   estados que ya tenia: preferencia del SO como segunda fuente, toggle
+   manual (atributo data-theme, ver ThemeToggle) como ultima palabra. */
+:root {
+  --bg: #020617;
+  --card: #0e1223;
+  --card-2: #141a30;
+  --border: #334155;
+  --fg: #f8fafc;
+  --muted: #94a3b8;
+
+  /* --accent es SOLO P&L/estado sano (verde=ganancia). --glow es
+     identidad de sistema (nunca un valor financiero). --ai marca
+     confianza del panel LLM, expected value, opportunity score -- nunca
+     P&L. Los tres significados no se mezclan nunca. */
+  --accent: #22c55e;
+  --accent-soft: rgba(34, 197, 94, 0.15);
+  --on-accent: #06210f;
+  --glow: #22d3ee;
+  --glow-soft: rgba(34, 211, 238, 0.14);
+  --ai: #a855f7;
+  --ai-soft: rgba(168, 85, 247, 0.15);
+  --warn: #f59e0b;
+  --warn-soft: rgba(245, 158, 11, 0.15);
+  --bad: #ef4444;
+  --bad-soft: rgba(239, 68, 68, 0.15);
+
+  --font-body: "Fira Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --card-2: #eef2f7;
+    --border: #dbe2ea;
+    --fg: #0f172a;
+    --muted: #64748b;
+    --accent: #16a34a;
+    --accent-soft: rgba(22, 163, 74, 0.12);
+    --on-accent: #ffffff;
+    --glow: #0891b2;
+    --glow-soft: rgba(8, 145, 178, 0.1);
+    --ai: #9333ea;
+    --ai-soft: rgba(147, 51, 234, 0.12);
+    --warn: #b45309;
+    --warn-soft: rgba(180, 83, 9, 0.12);
+    --bad: #dc2626;
+    --bad-soft: rgba(220, 38, 38, 0.12);
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: #f8fafc;
+  --card: #ffffff;
+  --card-2: #eef2f7;
+  --border: #dbe2ea;
+  --fg: #0f172a;
+  --muted: #64748b;
+  --accent: #16a34a;
+  --accent-soft: rgba(22, 163, 74, 0.12);
+  --on-accent: #ffffff;
+  --glow: #0891b2;
+  --glow-soft: rgba(8, 145, 178, 0.1);
+  --ai: #9333ea;
+  --ai-soft: rgba(147, 51, 234, 0.12);
+  --warn: #b45309;
+  --warn-soft: rgba(180, 83, 9, 0.12);
+  --bad: #dc2626;
+  --bad-soft: rgba(220, 38, 38, 0.12);
+}
+
+/* Alias hacia el namespace de utilidades de Tailwind -- `inline` para que
+   cada clase (bg-bg, text-accent, border-border...) referencie la
+   variable en tiempo de pintado, no el valor resuelto al momento del
+   build. Asi el cambio de tema sigue funcionando con clases de Tailwind. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-card-2: var(--card-2);
+  --color-border: var(--border);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-glow: var(--glow);
+  --color-glow-soft: var(--glow-soft);
+  --color-ai: var(--ai);
+  --color-ai-soft: var(--ai-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+::selection {
+  background: var(--glow-soft);
+}
+
+:focus-visible {
+  outline: 2px solid var(--glow);
+  outline-offset: 2px;
+}

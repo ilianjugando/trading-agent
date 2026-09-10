@@ -71,11 +71,17 @@ in `state/positions_stocks.json` — inspect it any time to see what the
 agent thinks it's holding and where its stop sits. Run this for a while —
 days, not minutes — before trusting it with the real $150.
 
-Or skip reading raw JSON and run `python dashboard.py`, then open
-http://127.0.0.1:8787 — a local read-only page showing pool health (with
-a staleness warning if a scheduled run stopped firing), circuit breaker
-status, and recent decisions/trades. Polls every 5s; doesn't run on a
-schedule, start it manually when you want to look.
+Or skip reading raw JSON and double-click `Abrir Dashboard.bat` (or run
+`.venv\Scripts\python -m uvicorn api.app:app --port 8787`), then open
+http://127.0.0.1:8787 — a full command-center UI (TypeScript + React,
+served by the same FastAPI process as the API) with portfolio value,
+live positions with entry thesis, the discovery funnel per pool, risk
+exposure, closed trades, and strategy performance. Also has a real
+start/stop control for the three scheduled tasks. Polls every 5s;
+doesn't run on a schedule, start it manually when you want to look. See
+`api/` (backend) and `dashboard-web/` (frontend) — `dashboard-web/README.md`
+if you need to work on the frontend directly (hot-reload dev server,
+regenerating types after a backend contract change).
 
 ## 5. Schedule it (Windows Task Scheduler)
 

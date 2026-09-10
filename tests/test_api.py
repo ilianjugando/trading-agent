@@ -242,6 +242,18 @@ def test_bot_status_route_returns_one_entry_per_task(monkeypatch):
     assert response.json() == {"tasks": {"TradingAgentPaper": "Disabled"}}
 
 
-def test_bot_start_and_stop_routes_are_post_only():
-    assert client.get("/bot-start").status_code == 405
-    assert client.get("/bot-stop").status_code == 405
+def test_bot_start_and_stop_never_act_on_a_get_request(monkeypatch):
+    """Lo que realmente importa no es el codigo de status exacto -- que
+    puede variar segun si dashboard-web/dist existe (con dist/, el
+    catch-all que sirve el SPA intercepta un GET perdido a estas rutas y
+    devuelve el index.html en vez de un 404/405; sin dist/, esas rutas ni
+    se registran) -- sino que un GET nunca puede terminar prendiendo o
+    apagando las tareas programadas. Esto es lo que hace seguro exponer
+    el control por HTTP."""
+    calls = []
+    monkeypatch.setattr(bot_control, "set_tasks_enabled", lambda enabled: calls.append(enabled))
+
+    client.get("/bot-start")
+    client.get("/bot-stop")
+
+    assert calls == []
