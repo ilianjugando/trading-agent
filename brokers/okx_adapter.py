@@ -29,6 +29,19 @@ class OKXAdapter:
     def get_usdt_balance(self) -> float:
         return self.get_balance("USDT")
 
+    def get_total_equity_usd(self) -> float:
+        """Valor TOTAL de la cuenta (efectivo + valor de mercado de todo lo
+        que se tiene) -- lo que run_crypto necesita como pool_value, el
+        mismo rol que NetLiquidation cumple del lado de IBKR (ver
+        ibkr_adapter.get_account_value). Bug real encontrado en vivo
+        (2026-09-10): run_crypto usaba get_usdt_balance() -- solo
+        efectivo -- para esto. A medida que el bot compraba cripto el
+        efectivo bajaba sin que el valor de lo comprado se sumara nunca,
+        asi que total_value en el dashboard parecia desplomarse aunque la
+        plata solo habia cambiado de USDT a otro activo, no desaparecido."""
+        resp = self.account.get_account_balance()
+        return float(resp["data"][0]["totalEq"])
+
     def get_last_price(self, inst_id: str) -> float:
         resp = self.market.get_ticker(instId=inst_id)
         return float(resp["data"][0]["last"])

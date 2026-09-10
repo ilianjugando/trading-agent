@@ -524,7 +524,7 @@ def run_crypto(settings) -> None:
 
     okx = OKXAdapter(settings.okx_api_key, settings.okx_api_secret, settings.okx_api_passphrase, settings.okx_demo_flag)
 
-    pool_value = okx.get_usdt_balance()
+    pool_value = okx.get_total_equity_usd()
     breaker.check(pool_value)
     _snapshot_portfolio(settings, "crypto", pool_value, positions)
 

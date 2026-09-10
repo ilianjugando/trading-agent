@@ -55,6 +55,21 @@ def test_rejected_order_raises_before_any_fill_lookup():
         assert "51008" in str(e)
 
 
+def test_get_total_equity_usd_reads_total_eq_not_just_cash():
+    """Bug found live (2026-09-10): run_crypto used get_usdt_balance()
+    (cash only) as pool_value. As the bot bought crypto, cash drained
+    without the purchased assets' value ever being counted, so the
+    dashboard's total_value looked like a crash while money had just
+    moved from USDT into other assets. totalEq is OKX's own total
+    account value -- cash plus everything held -- the same role
+    NetLiquidation plays for the IBKR side."""
+    adapter = _adapter()
+    adapter.account.get_account_balance = lambda **kwargs: {
+        "data": [{"totalEq": "101804.05099771592"}],
+    }
+    assert adapter.get_total_equity_usd() == 101804.05099771592
+
+
 def test_get_filled_base_qty_returns_just_the_quantity(monkeypatch):
     adapter = _adapter()
     adapter.trade.get_order = lambda **kwargs: {"data": [{"accFillSz": "42.5", "avgPx": "1.0"}]}
