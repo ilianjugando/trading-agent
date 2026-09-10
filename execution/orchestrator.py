@@ -408,9 +408,13 @@ def run_stocks(settings) -> None:
     ibkr = IBKRAdapter(settings.ibkr_host, settings.ibkr_port, settings.ibkr_client_id)
     try:
         pool_value = ibkr.get_account_value()
-        breaker.check(pool_value)
         _snapshot_portfolio(settings, "stocks", pool_value, positions)
 
+        # Las salidas van SIEMPRE, y van ANTES del corte -- mismo P0 que en
+        # run_crypto (auditoria 2026-09-10): con breaker.check() primero, al
+        # dispararse el corte este bucle no llegaba a correr nunca y las
+        # posiciones abiertas se quedaban sin stop-loss.
+        #
         # Manage existing positions first: exit on a stop-loss hit, otherwise
         # trail the stop up if a fresh, higher box has formed.
         for symbol, pos in list(positions.all_open().items()):
@@ -434,6 +438,9 @@ def run_stocks(settings) -> None:
                 _log(settings.logs_dir, "decisions.log", {
                     "pool": "stocks", "symbol": symbol, "result": "stop_trailed", "new_stop": box.box_bottom,
                 })
+
+        # A partir de aca es todo camino de ENTRADA: eso si lo gatea el corte.
+        breaker.check(pool_value)
 
         # Descubrimiento amplio sobre todo el watchlist. Antes esto era
         # scan_for_breakouts() -> candidates[0]: una sola estrategia (la caja
@@ -525,12 +532,26 @@ def run_crypto(settings) -> None:
     okx = OKXAdapter(settings.okx_api_key, settings.okx_api_secret, settings.okx_api_passphrase, settings.okx_demo_flag)
 
     pool_value = okx.get_total_equity_usd()
-    breaker.check(pool_value)
     _snapshot_portfolio(settings, "crypto", pool_value, positions)
 
-    # Las salidas van primero: liberar capital de posiciones que tocaron su
-    # stop antes de evaluar en que entrar.
+    # Las salidas van SIEMPRE, y van ANTES del corte -- P0 encontrado en la
+    # auditoria del 2026-09-10. Antes breaker.check() corria primero y
+    # levantaba TradingHalted, asi que al dispararse el corte (o sea, justo
+    # cuando el mercado va en contra) el stop-loss de cada posicion abierta
+    # dejaba de ejecutarse. Un corte tiene que frenar riesgo NUEVO, jamas
+    # frenar la REDUCCION del riesgo ya tomado.
     _manage_crypto_exits(settings, okx, positions, breaker, pool_value)
+
+    # A partir de aca es todo camino de ENTRADA: eso si lo gatea el corte.
+    try:
+        breaker.check(pool_value)
+    except TradingHalted as e:
+        # Se reporta como 'halted', no como 'error': "el bot decidio no
+        # operar" y "el bot dejo de funcionar" no pueden verse igual en el
+        # log. run_crypto no capturaba esto en absoluto y terminaba como un
+        # traceback generico en main().
+        _log(settings.logs_dir, "decisions.log", {"pool": "crypto", "result": "halted", "reason": str(e)})
+        return
 
     universe = liquid_crypto_universe(okx, top_n=settings.crypto_universe_size)
 

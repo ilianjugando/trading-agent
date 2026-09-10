@@ -177,3 +177,59 @@ def test_manage_crypto_exits_leaves_position_open_when_price_above_stop(tmp_path
 
     assert okx.sell_calls == []
     assert positions.get("ARB-USDT") is not None
+
+
+def _crypto_settings(tmp_path):
+    return SimpleNamespace(
+        okx_api_key="k", okx_api_secret="s", okx_api_passphrase="p", okx_demo_flag="1",
+        state_dir=tmp_path, logs_dir=tmp_path,
+        max_trade_pct=0.20, daily_loss_halt_pct=0.10, max_consecutive_losses=3,
+        crypto_universe_size=5, enable_kronos_forecast=False,
+        gemini_api_key="", nvidia_api_key="",
+    )
+
+
+def test_halted_breaker_still_runs_exits_but_blocks_new_entries(tmp_path, monkeypatch):
+    """P0 (auditoria 2026-09-10): breaker.check() corria ANTES de gestionar
+    salidas. Al dispararse el corte -- es decir, justo cuando el mercado va
+    en contra -- levantaba TradingHalted y el stop-loss de cada posicion
+    abierta dejaba de ejecutarse. El corte tiene que frenar riesgo NUEVO,
+    nunca frenar la REDUCCION de riesgo ya tomado.
+
+    En crypto era peor: run_crypto ni siquiera capturaba TradingHalted, asi
+    que se reportaba como 'error' con traceback en vez de 'halted'."""
+    import execution.orchestrator as orch
+    from risk.circuit_breaker import TradingHalted
+
+    calls = []
+
+    class _FakeOKX:
+        def __init__(self, *a, **kw):
+            pass
+
+        def get_total_equity_usd(self):
+            return 100_000.0
+
+    class _HaltedBreaker:
+        def __init__(self, *a, **kw):
+            pass
+
+        def check(self, pool_value):
+            raise TradingHalted("[crypto] Halted: drawdown de prueba")
+
+    def _fake_exits(*a, **kw):
+        calls.append("exits")
+
+    def _explode(*a, **kw):
+        raise AssertionError("no se puede buscar candidatos nuevos con el bot detenido")
+
+    monkeypatch.setattr(orch, "OKXAdapter", _FakeOKX)
+    monkeypatch.setattr(orch, "CircuitBreaker", _HaltedBreaker)
+    monkeypatch.setattr(orch, "_manage_crypto_exits", _fake_exits)
+    monkeypatch.setattr(orch, "liquid_crypto_universe", _explode)
+
+    orch.run_crypto(_crypto_settings(tmp_path))
+
+    assert "exits" in calls, "las salidas TIENEN que correr aunque el bot este detenido"
+    results = [d.get("result") for d in _decisions(tmp_path)]
+    assert "halted" in results, "un corte deliberado se reporta como 'halted', no como crash"

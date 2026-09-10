@@ -3,14 +3,24 @@
 State is persisted to disk (state/spend_<pool>.json) so limits survive
 process restarts within the same day — an orchestrator crash-and-retry
 loop can't be used to bypass the daily cap.
+
+La frontera del dia es UTC, igual que risk/circuit_breaker.py y que todos
+los timestamps que escribe el orchestrator. Antes era date.today() (fecha
+LOCAL de la maquina): el "dia" del limite de gasto no coincidia con el
+"dia" de los logs, y mover la maquina de zona horaria corria la frontera
+-- lo que en el peor caso reinicia el presupuesto diario antes de tiempo.
 """
 import json
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 class SpendLimitError(Exception):
     pass
+
+
+def _utc_today() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 class SpendGuard:
@@ -24,10 +34,10 @@ class SpendGuard:
 
     def _load(self) -> dict:
         if not self._state_file.exists():
-            return {"date": str(date.today()), "spent": 0.0}
+            return {"date": _utc_today(), "spent": 0.0}
         data = json.loads(self._state_file.read_text())
-        if data.get("date") != str(date.today()):
-            return {"date": str(date.today()), "spent": 0.0}
+        if data.get("date") != _utc_today():
+            return {"date": _utc_today(), "spent": 0.0}
         return data
 
     def _save(self, data: dict) -> None:

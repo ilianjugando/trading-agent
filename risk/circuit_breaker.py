@@ -1,13 +1,31 @@
 """Halts trading on drawdown or a losing streak. Persisted to disk so a
 process restart cannot silently clear a halt.
+
+Dos invariantes que este modulo tiene que sostener, ambas rotas por bugs
+reales encontrados en la auditoria del 2026-09-10:
+
+1. SOLO check() establece el baseline del dia (`day_start_value`).
+   record_trade_result() jamas puede escribirlo. Antes lo hacia via
+   _load(pool_value=0) -> day_start_value=0 -> `if start > 0` falso ->
+   corte por drawdown silenciosamente desactivado el resto del dia.
+
+2. La frontera del dia es UTC, igual que todos los timestamps que escribe
+   _log(). Antes era date.today() (fecha LOCAL de la maquina), asi que el
+   "dia" del limite de riesgo y el "dia" de los logs eran dias distintos,
+   y mover la maquina de zona horaria corria la frontera.
 """
 import json
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 class TradingHalted(Exception):
     pass
+
+
+def _utc_today() -> str:
+    """Fecha UTC, la misma base que usan todos los timestamps del sistema."""
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 class CircuitBreaker:
@@ -19,20 +37,23 @@ class CircuitBreaker:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self._state_file = self.state_dir / f"breaker_{pool}.json"
 
-    def _default_state(self, pool_value: float) -> dict:
+    def _default_state(self, pool_value: float | None) -> dict:
+        # day_start_value=None significa "el baseline del dia todavia no se
+        # establecio". Solo check() lo puede fijar, con el valor real del
+        # pool -- ver invariante 1 en el docstring del modulo.
         return {
-            "date": str(date.today()),
+            "date": _utc_today(),
             "day_start_value": pool_value,
             "consecutive_losses": 0,
             "halted": False,
             "halt_reason": None,
         }
 
-    def _load(self, pool_value: float) -> dict:
+    def _load(self, pool_value: float | None = None) -> dict:
         if not self._state_file.exists():
             return self._default_state(pool_value)
         data = json.loads(self._state_file.read_text())
-        if data.get("date") != str(date.today()):
+        if data.get("date") != _utc_today():
             # New day: reset drawdown tracking, but an unresolved halt stays
             # active until explicitly reset — a new day doesn't excuse it.
             fresh = self._default_state(pool_value)
@@ -52,8 +73,12 @@ class CircuitBreaker:
             self._save(state)
             raise TradingHalted(f"[{self.pool}] Halted: {state['halt_reason']}")
 
+        # Unico lugar donde se fija el baseline del dia (invariante 1).
+        if state.get("day_start_value") is None:
+            state["day_start_value"] = pool_value
+
         start = state["day_start_value"]
-        if start > 0:
+        if start is not None and start > 0:
             drawdown_pct = (pool_value - start) / start
             if drawdown_pct < -self.daily_loss_halt_pct:
                 state["halted"] = True
@@ -87,7 +112,9 @@ class CircuitBreaker:
         # que la estrategia este rota, que es lo que la racha intenta detectar.
         material_loss_pct = 0.02
 
-        state = self._load(pool_value=0)  # value unused for this update
+        # Sin pool_value a proposito: esta llamada NUNCA puede establecer ni
+        # pisar el baseline del dia (invariante 1 del modulo).
+        state = self._load()
         if won:
             state["consecutive_losses"] = 0
         elif loss_pct_of_pool is not None and loss_pct_of_pool < material_loss_pct:

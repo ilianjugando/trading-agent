@@ -92,6 +92,45 @@ def test_unknown_loss_size_is_treated_as_material(tmp_path):
     assert json.loads((tmp_path / "breaker_test.json").read_text())["halted"]
 
 
+def test_record_trade_result_never_destroys_the_day_baseline(tmp_path):
+    """P0 latente: record_trade_result llamaba a _load(pool_value=0) con el
+    comentario "value unused for this update" -- pero SI se usaba: si el
+    archivo de estado no existia todavia (o el dia habia cambiado),
+    _default_state lo inicializaba con day_start_value=0 y lo persistia.
+    Despues, check() hace `if start > 0`, que con 0 es falso: el corte por
+    drawdown diario queda silenciosamente desactivado el resto del dia.
+
+    Esto pasa de latente a alcanzable en cuanto las salidas corren antes
+    del check (que es exactamente el orden correcto, ver el P0 de
+    orchestrator): la primera salida del dia grabaria el baseline en 0."""
+    breaker = CircuitBreaker("test", tmp_path, daily_loss_halt_pct=0.10, max_consecutive_losses=3)
+
+    # Una salida ocurre ANTES del primer check del dia.
+    breaker.record_trade_result(won=False, loss_pct_of_pool=0.01)
+
+    # El baseline del dia lo tiene que establecer check(), con el valor real.
+    breaker.check(pool_value=100)
+
+    # Y el corte por drawdown tiene que seguir funcionando.
+    with pytest.raises(TradingHalted):
+        breaker.check(pool_value=85)  # -15%, supera el -10%
+
+
+def test_day_rollover_uses_utc_not_the_machines_local_date(tmp_path, monkeypatch):
+    """Todo el sistema loguea en UTC (_log usa datetime.now(timezone.utc)),
+    pero los limites de riesgo usaban date.today(), que es la fecha LOCAL
+    de la maquina. Con eso el 'dia' del limite de perdida y el 'dia' de los
+    logs son dias distintos, y mover la maquina de zona horaria (o el
+    horario de verano) corre la frontera."""
+    import risk.circuit_breaker as cb
+
+    breaker = CircuitBreaker("test", tmp_path, daily_loss_halt_pct=0.10, max_consecutive_losses=3)
+    breaker.check(pool_value=100)
+
+    state = json.loads((tmp_path / "breaker_test.json").read_text())
+    assert state["date"] == cb._utc_today(), "la fecha del estado tiene que ser UTC"
+
+
 def test_a_win_still_resets_the_streak(tmp_path):
     breaker = CircuitBreaker("test", tmp_path, daily_loss_halt_pct=0.10, max_consecutive_losses=3)
     breaker.record_trade_result(won=False, loss_pct_of_pool=0.08)
