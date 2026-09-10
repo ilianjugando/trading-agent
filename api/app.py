@@ -24,6 +24,8 @@ solamente, nunca expuesto a la red. Durante `npm run dev` (puerto 5173)
 el proxy de Vite habla directo con este servidor, asi que no hace falta
 CORS en ningun caso.
 """
+import time
+from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -31,11 +33,19 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import bot_control, data
-from api.schemas import DashboardData, TaskStatusResponse
+from api.schemas import DashboardData, MarketRadar, TaskStatusResponse
+from signals import market_radar
 
 app = FastAPI(title="Trading Agent API", version="1.0.0")
 
 _DIST_DIR = Path(__file__).resolve().parent.parent / "dashboard-web" / "dist"
+
+# El radar de mercado pega contra la API interna del screener de
+# TradingView (no oficial, ver signals/market_radar.py) -- un cache de
+# 60s evita golpearla en cada poll del frontend y evita el riesgo de
+# rate-limit si dos pestañas del dashboard estan abiertas a la vez.
+_RADAR_CACHE_SECONDS = 60
+_radar_cache: dict = {"ts": 0.0, "data": None}
 
 
 @app.get("/data", response_model=DashboardData)
@@ -56,6 +66,27 @@ def post_bot_start() -> dict:
 @app.post("/bot-stop", response_model=TaskStatusResponse)
 def post_bot_stop() -> dict:
     return {"tasks": bot_control.set_tasks_enabled(False)}
+
+
+@app.get("/market-radar", response_model=MarketRadar)
+def get_market_radar() -> dict:
+    """Puramente informativo -- ver signals/market_radar.py. No alimenta
+    ninguna decision de compra."""
+    from datetime import datetime, timezone
+
+    now = time.monotonic()
+    if _radar_cache["data"] is not None and now - _radar_cache["ts"] < _RADAR_CACHE_SECONDS:
+        cached = dict(_radar_cache["data"])
+        cached["generated_at"] = datetime.now(timezone.utc).isoformat()
+        return cached
+
+    result = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cex_movers": [asdict(m) for m in market_radar.cex_movers()],
+        "dex_movers": [asdict(m) for m in market_radar.dex_movers()],
+    }
+    _radar_cache["ts"], _radar_cache["data"] = now, result
+    return result
 
 
 # Deliberadamente NO se monta StaticFiles en "/": un Mount ahi es un

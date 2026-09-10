@@ -219,3 +219,22 @@ class DashboardData(BaseModel):
 
 class TaskStatusResponse(BaseModel):
     tasks: dict[str, str]
+
+
+class Mover(BaseModel):
+    symbol: str
+    exchange: str
+    price: float
+    change_24h_pct: float
+    volume_24h_usd: float
+    suspicious: bool
+
+
+class DexMover(Mover):
+    blockchain: str
+
+
+class MarketRadar(BaseModel):
+    generated_at: str
+    cex_movers: list[Mover]
+    dex_movers: list[DexMover]

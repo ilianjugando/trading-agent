@@ -9,11 +9,13 @@ import { ActivityTab } from "./tabs/ActivityTab";
 import { RiskTab } from "./tabs/RiskTab";
 import { TradesTab } from "./tabs/TradesTab";
 import { StrategiesTab } from "./tabs/StrategiesTab";
+import { RadarTab } from "./tabs/RadarTab";
 
 const TABS = [
   { value: "overview", label: "Overview" },
   { value: "positions", label: "Posiciones" },
   { value: "opportunities", label: "Oportunidades" },
+  { value: "radar", label: "Radar" },
   { value: "activity", label: "Actividad" },
   { value: "risk", label: "Riesgo" },
   { value: "trades", label: "Trades" },
@@ -58,6 +60,13 @@ export default function App() {
             </Tabs.Trigger>
           ))}
         </Tabs.List>
+
+        {/* El radar tiene su propio hook/polling (60s, independiente de
+            /data) -- se muestra aunque el resto del dashboard siga
+            cargando, en vez de quedar bloqueado por eso. */}
+        <Tabs.Content value="radar">
+          <RadarTab />
+        </Tabs.Content>
 
         {!data ? (
           <div className="py-16 text-center text-sm text-muted">Cargando datos del bot…</div>

@@ -8,6 +8,7 @@ import json
 from fastapi.testclient import TestClient
 
 from api import bot_control, data
+from signals import market_radar
 from api.app import app
 
 
@@ -257,3 +258,35 @@ def test_bot_start_and_stop_never_act_on_a_get_request(monkeypatch):
     client.get("/bot-stop")
 
     assert calls == []
+
+
+def test_market_radar_route_is_json_serializable_and_typed(monkeypatch):
+    from signals.market_radar import DexMover, Mover
+
+    monkeypatch.setattr(market_radar, "cex_movers", lambda: [
+        Mover(symbol="BINANCE:DOGEUSDT", exchange="Binance", price=0.15,
+              change_24h_pct=42.3, volume_24h_usd=5_000_000.0, suspicious=False),
+    ])
+    monkeypatch.setattr(market_radar, "dex_movers", lambda: [
+        DexMover(symbol="RAYDIUM:FOO", exchange="Raydium", blockchain="Solana",
+                 price=0.002, change_24h_pct=88.0, volume_24h_usd=60_000.0, suspicious=False),
+    ])
+
+    response = client.get("/market-radar")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cex_movers"][0]["symbol"] == "BINANCE:DOGEUSDT"
+    assert body["dex_movers"][0]["blockchain"] == "Solana"
+
+
+def test_market_radar_caches_for_60_seconds(monkeypatch):
+    calls = []
+    monkeypatch.setattr(market_radar, "cex_movers", lambda: calls.append(1) or [])
+    monkeypatch.setattr(market_radar, "dex_movers", lambda: [])
+    import api.app as app_module
+    app_module._radar_cache["ts"] = 0.0
+    app_module._radar_cache["data"] = None
+
+    client.get("/market-radar")
+    client.get("/market-radar")
+    assert len(calls) == 1  # la segunda llamada uso el cache, no pego de nuevo a TradingView
