@@ -353,8 +353,35 @@ def _manage_crypto_exits(settings, okx, positions, breaker, pool_value) -> None:
             continue
 
         try:
-            # OKX dimensiona las ventas en moneda base, no en USDT.
-            result = okx.place_market_order(inst_id, pos["qty"], "sell")
+            # Vender contra el balance REAL, no contra pos["qty"] --
+            # encontrado en vivo (2026-09-10, prueba de salida forzada +
+            # reconciliacion): pos["qty"] puede estar mal por motivos que
+            # van mas alla del bug de estimacion ya arreglado en
+            # OKXAdapter.place_market_order (orden cancelada sin llenarse
+            # en absoluto, llenado parcial, alguna comision que no queda
+            # reflejada en accFillSz). Cualquier desvio entre lo que el
+            # estado local cree tener y lo que la cuenta realmente tiene
+            # hace que la venta se rechace (51008) justo cuando el stop
+            # tiene que proteger de verdad. Pedir el balance real antes de
+            # vender lo hace inmune a esa clase entera de desvio, en vez
+            # de perseguir cada causa posible una por una.
+            real_balance = okx.get_balance(inst_id.split("-")[0])
+
+            if real_balance <= 0:
+                # No hay nada que vender -- la compra original nunca se
+                # llego a llenar de verdad (o la posicion ya no existe por
+                # otro motivo). Cerrar el tracking es una correccion de
+                # datos, no una operacion: no cuenta como trade ganado o
+                # perdido para el circuit breaker, y no va a trades.log.
+                positions.close(inst_id)
+                _log(settings.logs_dir, "decisions.log", {
+                    "pool": "crypto", "symbol": inst_id, "result": "phantom_position_cleared",
+                    "reason": "balance real es 0 -- la compra original nunca se lleno",
+                })
+                continue
+
+            sell_qty = min(pos["qty"], real_balance)
+            result = okx.place_market_order(inst_id, sell_qty, "sell")
             won = price > pos["entry_price"]
             positions.close(inst_id)
             breaker.record_trade_result(won, loss_pct_of_pool=_loss_fraction(pos, price, pool_value))

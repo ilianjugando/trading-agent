@@ -6,8 +6,11 @@ from zoneinfo import ZoneInfo
 from execution.orchestrator import (
     _check_deployment_alert,
     _evaluate_candidates,
+    _manage_crypto_exits,
     _market_is_open,
 )
+from execution.positions import PositionTracker
+from risk.circuit_breaker import CircuitBreaker
 from signals.opportunity_scanner import Candidate, ScanResult
 
 _NY = ZoneInfo("America/New_York")
@@ -115,3 +118,62 @@ def test_deployment_alert_skipped_when_something_executed(tmp_path):
     _check_deployment_alert(_settings(tmp_path), "crypto", scan_result, executed=1,
                             pool_value=1000.0, held=set())
     assert _decisions(tmp_path) == []
+
+
+class _FakeOKXExit:
+    def __init__(self, price, balances):
+        self.price = price
+        self.balances = balances
+        self.sell_calls = []
+
+    def get_last_price(self, inst_id):
+        return self.price
+
+    def get_balance(self, ccy):
+        return self.balances.get(ccy, 0.0)
+
+    def place_market_order(self, inst_id, sz, side):
+        self.sell_calls.append((inst_id, sz))
+        return {"instId": inst_id, "side": side, "ordId": "1", "status": "submitted"}
+
+
+def _breaker(tmp_path):
+    return CircuitBreaker("crypto", tmp_path, daily_loss_halt_pct=0.5, max_consecutive_losses=10)
+
+
+def test_manage_crypto_exits_sells_the_real_balance_not_the_stale_tracked_qty(tmp_path):
+    positions = PositionTracker("crypto", tmp_path)
+    positions.open("ARB-USDT", entry_price=0.15, qty=1000.0, stop=0.14)
+    okx = _FakeOKXExit(0.10, {"ARB": 800.0})
+
+    _manage_crypto_exits(_settings(tmp_path), okx, positions, _breaker(tmp_path), pool_value=1000.0)
+
+    assert okx.sell_calls == [("ARB-USDT", 800.0)]
+    assert positions.get("ARB-USDT") is None
+    decisions = _decisions(tmp_path)
+    assert decisions[-1]["result"] == "stopped_out"
+
+
+def test_manage_crypto_exits_clears_phantom_position_without_attempting_a_sell(tmp_path):
+    positions = PositionTracker("crypto", tmp_path)
+    positions.open("IOST-USDT", entry_price=0.0019, qty=800000.0, stop=0.0017)
+    okx = _FakeOKXExit(0.001, {})
+
+    _manage_crypto_exits(_settings(tmp_path), okx, positions, _breaker(tmp_path), pool_value=1000.0)
+
+    assert okx.sell_calls == []
+    assert positions.get("IOST-USDT") is None
+    decisions = _decisions(tmp_path)
+    assert decisions[-1]["result"] == "phantom_position_cleared"
+    assert not (tmp_path / "trades.log").exists()
+
+
+def test_manage_crypto_exits_leaves_position_open_when_price_above_stop(tmp_path):
+    positions = PositionTracker("crypto", tmp_path)
+    positions.open("ARB-USDT", entry_price=0.15, qty=1000.0, stop=0.14)
+    okx = _FakeOKXExit(0.20, {"ARB": 1000.0})
+
+    _manage_crypto_exits(_settings(tmp_path), okx, positions, _breaker(tmp_path), pool_value=1000.0)
+
+    assert okx.sell_calls == []
+    assert positions.get("ARB-USDT") is not None

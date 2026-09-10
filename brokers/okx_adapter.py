@@ -15,12 +15,19 @@ class OKXAdapter:
         self.trade = TradeAPI(api_key, api_secret, passphrase, False, demo_flag)
         self.market = MarketAPI(api_key, api_secret, passphrase, False, demo_flag)
 
-    def get_usdt_balance(self) -> float:
-        resp = self.account.get_account_balance(ccy="USDT")
+    def get_balance(self, ccy: str) -> float:
+        """Actually-available balance of one currency, right now -- ground
+        truth for "how much can I sell", immune to any drift in a locally
+        tracked qty (a stale estimate, dust from fees, staking rewards...).
+        """
+        resp = self.account.get_account_balance(ccy=ccy)
         details = resp["data"][0]["details"]
         if not details:
             return 0.0
         return float(details[0]["availBal"])
+
+    def get_usdt_balance(self) -> float:
+        return self.get_balance("USDT")
 
     def get_last_price(self, inst_id: str) -> float:
         resp = self.market.get_ticker(instId=inst_id)
