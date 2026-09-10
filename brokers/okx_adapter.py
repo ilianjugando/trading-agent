@@ -103,7 +103,21 @@ class OKXAdapter:
         """side: 'buy' or 'sell'. Spot market order sized in quote currency
         (USDT, 2 decimals) for buys; base currency (e.g. BTC, needs finer
         precision -- rounding a small BTC amount to 2 decimals truncates
-        it to 0 and the order is rejected) for sells."""
+        it to 0 and the order is rejected) for sells.
+
+        For a buy, `price`/`qty` in the returned dict are the ACTUAL fill
+        (queried back from OKX), not an estimate. Bug found live
+        (2026-09-10, forced-exit test on CAT-USDT): the caller used to
+        estimate qty as usd_amount/current_price, which ignores that OKX
+        takes its trading fee out of the received base currency -- the
+        estimate was consistently ~0.1% too high. That doesn't show up
+        until the position is later sold: the sell asks for slightly more
+        than the account actually holds and OKX rejects it outright
+        (51008, insufficient balance) -- exactly the moment a stop-loss
+        needs to work. get_filled_base_qty() already existed and did this
+        correctly, but was only ever wired into scripts/smoke_test_order.py,
+        never into the live orchestrator path.
+        """
         sz = str(round(usd_amount, 2)) if side == "buy" else str(round(usd_amount, 8))
         resp = self.trade.place_order(
             instId=inst_id,
@@ -116,20 +130,31 @@ class OKXAdapter:
         data = resp["data"][0]
         if data.get("sCode") != "0":
             raise RuntimeError(f"OKX order rejected ({data.get('sCode')}): {data.get('sMsg')}")
-        return {
+
+        result = {
             "instId": inst_id,
             "side": side,
             "usd_amount": usd_amount,
             "ordId": data.get("ordId"),
             "status": "submitted",
         }
+        if side == "buy":
+            fill = self._wait_for_fill(inst_id, data.get("ordId"))
+            result["qty"] = fill["qty"]
+            result["price"] = fill["price"]
+        return result
+
+    def _wait_for_fill(self, inst_id: str, ord_id: str) -> dict:
+        """Actual fill for a just-placed market order -- `accFillSz` (base
+        currency, net of fees) and `avgPx`. Market orders fill almost
+        immediately; a short wait covers that without polling."""
+        time.sleep(1)
+        resp = self.trade.get_order(instId=inst_id, ordId=ord_id)
+        data = resp["data"][0]
+        return {"qty": float(data["accFillSz"]), "price": float(data["avgPx"])}
 
     def get_filled_base_qty(self, inst_id: str, ord_id: str) -> float:
         """Base-currency amount actually filled by a market order -- needed
-        because place_market_order's response doesn't include it (a buy is
-        sized in quote currency, but selling later needs the base-currency
-        amount received). Market orders fill almost immediately; a short
-        wait covers that without polling."""
-        time.sleep(1)
-        resp = self.trade.get_order(instId=inst_id, ordId=ord_id)
-        return float(resp["data"][0]["accFillSz"])
+        because a sell needs the base-currency amount received, and a buy
+        sized in quote currency doesn't state it up front."""
+        return self._wait_for_fill(inst_id, ord_id)["qty"]
