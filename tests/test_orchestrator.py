@@ -238,3 +238,42 @@ def test_halted_breaker_still_runs_exits_but_blocks_new_entries(tmp_path, monkey
     assert "exits" in calls, "las salidas TIENEN que correr aunque el bot este detenido"
     results = [d.get("result") for d in _decisions(tmp_path)]
     assert "halted" in results, "un corte deliberado se reporta como 'halted', no como crash"
+
+
+def test_kill_switch_stops_orders_mid_cycle(tmp_path):
+    """Seccion 36: el corte se consulta antes de CADA orden, no una sola
+    vez al arrancar -- accionarlo tiene que detener tambien un ciclo que ya
+    esta corriendo, y una corrida manual que nunca paso por el Programador
+    de tareas."""
+    from risk import kill_switch
+
+    kill_switch.engage(tmp_path, reason="parada de emergencia")
+
+    settings = SimpleNamespace(logs_dir=tmp_path, state_dir=tmp_path)
+    scan_result = ScanResult(scanned=1, shortlist=[_candidate("NEAR-USDT")],
+                             rejected=[], rejection_summary={})
+
+    executed = _evaluate_candidates(
+        settings, scan_result, pool="crypto", pool_value=1000.0,
+        held=set(), guard=None, positions=_NoPositions(),
+        place_order=lambda *a: (_ for _ in ()).throw(AssertionError("no puede comprar con el corte activo")),
+    )
+
+    assert executed == 0
+    assert _decisions(tmp_path)[-1]["result"] == "blocked_by_kill_switch"
+
+
+def test_kill_switch_does_not_block_exits(tmp_path):
+    """Un corte que impidiera ejecutar un stop-loss dejaria las posiciones
+    sin proteccion -- lo contrario de lo que se busca al accionarlo."""
+    from risk import kill_switch
+
+    kill_switch.engage(tmp_path, reason="parada de emergencia")
+
+    positions = PositionTracker("crypto", tmp_path)
+    positions.open("ARB-USDT", entry_price=0.15, qty=1000.0, stop=0.14)
+    okx = _FakeOKXExit(0.10, {"ARB": 1000.0})
+
+    _manage_crypto_exits(_settings(tmp_path), okx, positions, _breaker(tmp_path), pool_value=1000.0)
+
+    assert okx.sell_calls == [("ARB-USDT", 1000.0)], "la salida tiene que ejecutarse igual"

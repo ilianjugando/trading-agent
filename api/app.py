@@ -33,7 +33,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import bot_control, data
-from api.schemas import DashboardData, MarketRadar, TaskStatusResponse
+from api.schemas import DashboardData, KillSwitchRequest, KillSwitchStatus, MarketRadar, TaskStatusResponse
+from risk import kill_switch
 from signals import market_radar
 
 app = FastAPI(title="Trading Agent API", version="1.0.0")
@@ -66,6 +67,33 @@ def post_bot_start() -> dict:
 @app.post("/bot-stop", response_model=TaskStatusResponse)
 def post_bot_stop() -> dict:
     return {"tasks": bot_control.set_tasks_enabled(False)}
+
+
+@app.get("/kill-switch", response_model=KillSwitchStatus)
+def get_kill_switch() -> dict:
+    return _kill_switch_status()
+
+
+@app.post("/kill-switch/engage", response_model=KillSwitchStatus)
+def post_kill_switch_engage(body: KillSwitchRequest | None = None) -> dict:
+    """Corta la apertura de posiciones NUEVAS. Las salidas (stop-loss)
+    siguen ejecutandose siempre -- ver risk/kill_switch.py."""
+    reason = (body.reason if body else None) or "accionado desde el dashboard"
+    kill_switch.engage(data.STATE_DIR, reason=reason, pools=body.pools if body else None)
+    return _kill_switch_status()
+
+
+@app.post("/kill-switch/release", response_model=KillSwitchStatus)
+def post_kill_switch_release() -> dict:
+    kill_switch.release(data.STATE_DIR)
+    return _kill_switch_status()
+
+
+def _kill_switch_status() -> dict:
+    return {
+        "stocks_blocked": kill_switch.blocked_reason(data.STATE_DIR, "stocks"),
+        "crypto_blocked": kill_switch.blocked_reason(data.STATE_DIR, "crypto"),
+    }
 
 
 @app.get("/market-radar", response_model=MarketRadar)

@@ -221,6 +221,17 @@ class TaskStatusResponse(BaseModel):
     tasks: dict[str, str]
 
 
+class KillSwitchStatus(BaseModel):
+    """None = ese pool puede abrir posiciones; string = motivo del corte."""
+    stocks_blocked: str | None
+    crypto_blocked: str | None
+
+
+class KillSwitchRequest(BaseModel):
+    reason: str | None = None
+    pools: list[str] | None = None
+
+
 class Mover(BaseModel):
     symbol: str
     exchange: str

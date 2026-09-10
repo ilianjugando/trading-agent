@@ -25,6 +25,7 @@ from execution import tournament
 from execution.positions import PositionTracker
 from execution.run_lock import AlreadyRunning, RunLock
 from execution.sizing import BUCKET_CAPS, classify_bucket, size_position
+from risk import kill_switch
 from risk.circuit_breaker import CircuitBreaker, TradingHalted
 from risk.spend_guard import SpendGuard, SpendLimitError
 from signals.crypto_fundamentals import (
@@ -159,6 +160,17 @@ def _evaluate_candidates(settings, scan_result, pool, pool_value, held, guard, p
             _log(settings.logs_dir, "decisions.log", {
                 "pool": pool, "symbol": symbol, "result": "skipped_capital_reserve",
                 "reason": f"{deployed / pool_value:.0%} del capital desplegado, tope {MAX_DEPLOYED_PCT:.0%}",
+            })
+            break
+
+        # Corte de emergencia, consultado ANTES de cada orden -- no una sola
+        # vez al arrancar el ciclo: asi accionarlo detiene tambien un ciclo
+        # que ya esta en curso. Ver risk/kill_switch.py.
+        kill_reason = kill_switch.blocked_reason(settings.state_dir, pool)
+        if kill_reason:
+            _log(settings.logs_dir, "decisions.log", {
+                "pool": pool, "symbol": symbol, "result": "blocked_by_kill_switch",
+                "reason": kill_reason,
             })
             break
 
