@@ -2,6 +2,7 @@
 environment (paper mode, separate API keys); flag='0' is live.
 """
 import time
+import uuid
 
 import pandas as pd
 from okx.Account import AccountAPI
@@ -29,18 +30,65 @@ class OKXAdapter:
     def get_usdt_balance(self) -> float:
         return self.get_balance("USDT")
 
-    def get_total_equity_usd(self) -> float:
-        """Valor TOTAL de la cuenta (efectivo + valor de mercado de todo lo
-        que se tiene) -- lo que run_crypto necesita como pool_value, el
-        mismo rol que NetLiquidation cumple del lado de IBKR (ver
-        ibkr_adapter.get_account_value). Bug real encontrado en vivo
-        (2026-09-10): run_crypto usaba get_usdt_balance() -- solo
-        efectivo -- para esto. A medida que el bot compraba cripto el
-        efectivo bajaba sin que el valor de lo comprado se sumara nunca,
-        asi que total_value en el dashboard parecia desplomarse aunque la
-        plata solo habia cambiado de USDT a otro activo, no desaparecido."""
+    def get_equity(self) -> dict:
+        """Valor TOTAL de la cuenta, calculado por nosotros, mas la cifra
+        que reporta el exchange, mas la divergencia entre ambas.
+
+        Por que no se usa `totalEq` de OKX directamente: medido en vivo
+        (2026-09-10) OKX reportaba eqUsd de STX en $5.575,49 cuando el
+        valor real a precio de mercado era $1.091,90 -- 5,1x de error en un
+        campo del propio exchange, suficiente para inflar el pool_value un
+        ~4% y con el todo el sizing y el baseline de drawdown.
+
+        La cifra que manda es la que calculamos con `get_last_price`, que
+        es la MISMA fuente de precio que usan los stops y el P&L. Asi el
+        sistema entero valua con un solo criterio, en vez de que el sizing
+        use la cuenta del exchange y los stops otra (seccion 45: un solo
+        source of truth). La cifra del exchange se conserva para poder
+        alertar cuando discrepen, nunca para corregir en silencio.
+
+        Un solo par de llamadas: un balance + un get_tickers de todo el
+        mercado spot (no una por simbolo).
+        """
         resp = self.account.get_account_balance()
-        return float(resp["data"][0]["totalEq"])
+        account = resp["data"][0]
+        exchange_reported = float(account.get("totalEq") or 0.0)
+
+        tickers = self.market.get_tickers(instType="SPOT")
+        prices = {
+            row["instId"]: float(row["last"])
+            for row in tickers["data"]
+            if row.get("last")
+        }
+
+        computed = 0.0
+        unpriced: dict[str, float] = {}
+        for detail in account.get("details", []):
+            ccy = detail["ccy"]
+            qty = float(detail.get("availBal") or 0.0)
+            if qty <= 0:
+                continue
+            if ccy in ("USDT", "USD", "USDC"):
+                computed += qty
+                continue
+            price = prices.get(f"{ccy}-USDT")
+            if price is None:
+                # No se puede valuar: se informa en vez de asumir cero en
+                # silencio (un cero silencioso es indistinguible de "no hay
+                # nada", ver seccion 15).
+                unpriced[ccy] = qty
+                continue
+            computed += qty * price
+
+        divergence_pct = (
+            (exchange_reported - computed) / computed * 100 if computed > 0 else 0.0
+        )
+        return {
+            "equity_usd": round(computed, 2),
+            "exchange_reported_usd": round(exchange_reported, 2),
+            "divergence_pct": round(divergence_pct, 2),
+            "unpriced": unpriced,
+        }
 
     def get_last_price(self, inst_id: str) -> float:
         resp = self.market.get_ticker(instId=inst_id)
@@ -139,14 +187,34 @@ class OKXAdapter:
         never into the live orchestrator path.
         """
         sz = str(round(usd_amount, 2)) if side == "buy" else str(round(usd_amount, 8))
-        resp = self.trade.place_order(
-            instId=inst_id,
-            tdMode="cash",
-            side=side,
-            ordType="market",
-            sz=sz,
-            tgtCcy="quote_ccy" if side == "buy" else "base_ccy",
-        )
+
+        # Idempotency key. Sin esto, un fallo ambiguo de red (la peticion
+        # salio, la respuesta se perdio) es indistinguible de un fallo
+        # limpio: el codigo lo registra como rechazo y sigue, pero la orden
+        # puede haberse ejecutado igual -- y una posicion real que el
+        # sistema no registro es una posicion sin stop-loss. Con un clOrdId
+        # propio se puede preguntarle despues a OKX si esa orden existe.
+        cl_ord_id = f"ta{uuid.uuid4().hex[:24]}"
+
+        try:
+            resp = self.trade.place_order(
+                instId=inst_id,
+                tdMode="cash",
+                side=side,
+                ordType="market",
+                sz=sz,
+                tgtCcy="quote_ccy" if side == "buy" else "base_ccy",
+                clOrdId=cl_ord_id,
+            )
+        except Exception as network_error:
+            landed = self._find_order_by_client_id(inst_id, cl_ord_id)
+            if landed is None:
+                raise
+            # La orden SI existe: el fallo era solo de la respuesta. Se
+            # sigue adelante con la orden real en vez de perderle el rastro.
+            resp = {"data": [{"sCode": "0", "ordId": landed.get("ordId"), "sMsg": ""}]}
+            _ = network_error
+
         data = resp["data"][0]
         if data.get("sCode") != "0":
             raise RuntimeError(f"OKX order rejected ({data.get('sCode')}): {data.get('sMsg')}")
@@ -156,6 +224,7 @@ class OKXAdapter:
             "side": side,
             "usd_amount": usd_amount,
             "ordId": data.get("ordId"),
+            "clOrdId": cl_ord_id,
             "status": "submitted",
         }
         if side == "buy":
@@ -163,6 +232,19 @@ class OKXAdapter:
             result["qty"] = fill["qty"]
             result["price"] = fill["price"]
         return result
+
+    def _find_order_by_client_id(self, inst_id: str, cl_ord_id: str) -> dict | None:
+        """La orden con ese clOrdId, si OKX la tiene. None si no existe o
+        si tampoco se puede consultar. Se usa solo para desambiguar un
+        fallo de red: ver place_market_order."""
+        try:
+            resp = self.trade.get_order(instId=inst_id, clOrdId=cl_ord_id)
+        except Exception:
+            return None
+        rows = resp.get("data") or []
+        if not rows or not rows[0].get("ordId"):
+            return None
+        return rows[0]
 
     def _wait_for_fill(self, inst_id: str, ord_id: str) -> dict:
         """Actual fill for a just-placed market order -- `accFillSz` (base

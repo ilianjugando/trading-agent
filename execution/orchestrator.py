@@ -22,6 +22,7 @@ from config.settings import load_settings
 from config.universe import resolve_stock_universe
 from execution import tournament
 from execution.positions import PositionTracker
+from execution.run_lock import AlreadyRunning, RunLock
 from execution.sizing import BUCKET_CAPS, classify_bucket, size_position
 from risk.circuit_breaker import CircuitBreaker, TradingHalted
 from risk.spend_guard import SpendGuard, SpendLimitError
@@ -100,6 +101,12 @@ MAX_OPEN_POSITIONS = 12
 # mejor oportunidad de la semana porque el capital ya esta en las quince
 # anteriores, que eran peores.
 MAX_DEPLOYED_PCT = 0.60
+
+# Cuanta diferencia entre nuestra valuacion y la del exchange amerita una
+# alerta. No es un umbral de tolerancia -- por debajo tambien se usa
+# siempre nuestro numero; es el punto donde la diferencia deja de ser
+# redondeo y pasa a merecer que un humano la mire.
+EQUITY_DIVERGENCE_ALERT_PCT = 1.0
 
 
 def _deployed_usd(positions) -> float:
@@ -531,7 +538,28 @@ def run_crypto(settings) -> None:
 
     okx = OKXAdapter(settings.okx_api_key, settings.okx_api_secret, settings.okx_api_passphrase, settings.okx_demo_flag)
 
-    pool_value = okx.get_total_equity_usd()
+    equity = okx.get_equity()
+    pool_value = equity["equity_usd"]
+
+    # Reconciliacion contra el exchange (seccion 13): si la cuenta propia y
+    # la del exchange no coinciden, se avisa -- nunca se corrige en
+    # silencio. Medido en vivo: OKX reportaba STX 5,1x por encima de su
+    # valor de mercado real, lo que inflaba el pool ~4%.
+    if abs(equity["divergence_pct"]) >= EQUITY_DIVERGENCE_ALERT_PCT:
+        _log(settings.logs_dir, "decisions.log", {
+            "pool": "crypto", "result": "equity_reconciliation_alert",
+            "computed_usd": equity["equity_usd"],
+            "exchange_reported_usd": equity["exchange_reported_usd"],
+            "divergence_pct": equity["divergence_pct"],
+            "detail": "se usa el valor calculado con precios de mercado, no el del exchange",
+        })
+    if equity["unpriced"]:
+        _log(settings.logs_dir, "decisions.log", {
+            "pool": "crypto", "result": "unpriced_holdings",
+            "holdings": equity["unpriced"],
+            "detail": "activos en la cuenta que no se pudieron valuar -- quedan fuera del pool_value",
+        })
+
     _snapshot_portfolio(settings, "crypto", pool_value, positions)
 
     # Las salidas van SIEMPRE, y van ANTES del corte -- P0 encontrado en la
@@ -641,11 +669,30 @@ def main() -> int:
     os.environ["TRADING_MODE"] = args.mode
     settings = load_settings()
 
+    def _run_pool(pool: str, fn) -> None:
+        """Un ciclo por pool a la vez. Ver execution/run_lock.py: sin esto,
+        una corrida manual y una programada pueden solaparse, leer el mismo
+        estado y comprar los mismos simbolos dos veces."""
+        try:
+            with RunLock(pool, settings.state_dir) as lock:
+                if lock.took_over_stale_lock:
+                    _log(settings.logs_dir, "decisions.log", {
+                        "pool": pool, "result": "stale_lock_taken_over",
+                        "reason": "habia un lock viejo de un proceso que ya no existe",
+                    })
+                fn(settings)
+        except AlreadyRunning as e:
+            # No es un error: es la proteccion funcionando. Se registra
+            # como tal para no confundirlo con una caida.
+            _log(settings.logs_dir, "decisions.log", {
+                "pool": pool, "result": "skipped_already_running", "reason": str(e),
+            })
+
     try:
         if args.pool in ("stocks", "both"):
-            run_stocks(settings)
+            _run_pool("stocks", run_stocks)
         if args.pool in ("crypto", "both"):
-            run_crypto(settings)
+            _run_pool("crypto", run_crypto)
     except Exception:
         _log(settings.logs_dir, "decisions.log", {"pool": args.pool, "result": "error", "traceback": traceback.format_exc()})
         return 1

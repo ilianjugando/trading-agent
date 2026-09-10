@@ -207,8 +207,13 @@ def test_halted_breaker_still_runs_exits_but_blocks_new_entries(tmp_path, monkey
         def __init__(self, *a, **kw):
             pass
 
-        def get_total_equity_usd(self):
-            return 100_000.0
+        def get_equity(self):
+            return {
+                "equity_usd": 100_000.0,
+                "exchange_reported_usd": 100_000.0,
+                "divergence_pct": 0.0,
+                "unpriced": {},
+            }
 
     class _HaltedBreaker:
         def __init__(self, *a, **kw):
