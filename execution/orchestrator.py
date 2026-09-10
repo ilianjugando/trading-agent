@@ -18,6 +18,7 @@ import yfinance as yf
 
 from brokers.ibkr_adapter import IBKRAdapter
 from brokers.okx_adapter import OKXAdapter
+from config import limits
 from config.settings import load_settings
 from config.universe import resolve_stock_universe
 from execution import tournament
@@ -91,16 +92,10 @@ def _log(logs_dir, filename: str, record: dict) -> None:
 # cuesta 3 llamadas a modelos externos con cuota diaria.
 MAX_CANDIDATES_PER_CYCLE = 5
 
-# Techos de cartera. Muchas posiciones chicas es la estrategia; infinitas
-# posiciones chicas es dispersion sin tesis, y ademas hace imposible
-# monitorear cada salida. Medido: sin este limite el sistema abria 5
-# posiciones por ciclo cada 30 minutos.
-MAX_OPEN_POSITIONS = 12
-
-# Reserva de oportunidad. Quedarse sin efectivo significa no poder tomar la
-# mejor oportunidad de la semana porque el capital ya esta en las quince
-# anteriores, que eran peores.
-MAX_DEPLOYED_PCT = 0.60
+# Techos de cartera: definidos en config/limits.py, un solo lugar
+# compartido con el dashboard (ver el docstring de ese modulo).
+MAX_OPEN_POSITIONS = limits.MAX_OPEN_POSITIONS
+MAX_DEPLOYED_PCT = limits.MAX_DEPLOYED_PCT
 
 # Cuanta diferencia entre nuestra valuacion y la del exchange amerita una
 # alerta. No es un umbral de tolerancia -- por debajo tambien se usa

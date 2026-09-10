@@ -18,6 +18,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from config.state_store import write_json_atomic
+
 
 class TradingHalted(Exception):
     pass
@@ -63,7 +65,7 @@ class CircuitBreaker:
         return data
 
     def _save(self, data: dict) -> None:
-        self._state_file.write_text(json.dumps(data))
+        write_json_atomic(self._state_file, data)
 
     def check(self, pool_value: float) -> None:
         """Raise TradingHalted if trading should not proceed right now."""

@@ -290,3 +290,36 @@ def test_market_radar_caches_for_60_seconds(monkeypatch):
     client.get("/market-radar")
     client.get("/market-radar")
     assert len(calls) == 1  # la segunda llamada uso el cache, no pego de nuevo a TradingView
+
+
+def test_stocks_window_uses_market_timezone_not_the_machines(monkeypatch):
+    """Bug (auditoria 2026-09-10): la ventana estaba en hora LOCAL de la
+    maquina mientras el bot usa hora de Nueva York. En esta maquina (UTC-5)
+    quedaba una hora corrida, y al mover la maquina de zona horaria se
+    movia sola -- dashboard y bot discrepando sobre cuando el mercado esta
+    abierto."""
+    from datetime import datetime, timezone
+
+    # 14:00 UTC de un martes = 10:00 en Nueva York -> mercado abierto,
+    # 09:00 en esta maquina (UTC-5).
+    assert data._within_stocks_window(datetime(2026, 9, 8, 14, 0, tzinfo=timezone.utc))
+
+    # 21:00 UTC = 17:00 NY -> cerrado, aunque en otras zonas seria mediodia.
+    assert not data._within_stocks_window(datetime(2026, 9, 8, 21, 0, tzinfo=timezone.utc))
+
+    # Sabado: cerrado a cualquier hora.
+    assert not data._within_stocks_window(datetime(2026, 9, 5, 14, 0, tzinfo=timezone.utc))
+
+
+def test_dashboard_and_bot_share_one_definition_of_the_limits():
+    """Seccion 45: una sola verdad. Antes data.py intentaba importarlos del
+    orchestrator y, si fallaba, caia a copias escritas a mano -- el
+    dashboard mostrando en silencio un limite distinto del que el bot
+    aplica."""
+    from config import limits
+    from execution import orchestrator
+
+    assert data.MAX_OPEN_POSITIONS == limits.MAX_OPEN_POSITIONS
+    assert data.MAX_DEPLOYED_PCT == limits.MAX_DEPLOYED_PCT
+    assert orchestrator.MAX_OPEN_POSITIONS == limits.MAX_OPEN_POSITIONS
+    assert orchestrator.MAX_DEPLOYED_PCT == limits.MAX_DEPLOYED_PCT

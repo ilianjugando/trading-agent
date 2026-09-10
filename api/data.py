@@ -8,24 +8,26 @@ de http.server + json.dumps a mano), no la implementacion.
 import json
 from datetime import datetime, time, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from config.limits import MAX_DEPLOYED_PCT, MAX_OPEN_POSITIONS
 
 ROOT = Path(__file__).resolve().parent.parent
 LOGS_DIR = ROOT / "logs"
 STATE_DIR = ROOT / "state"
 
-# La ventana horaria de la tarea programada (ver Task Scheduler
-# "TradingAgentPaper"). Solo para no marcar "stale" a acciones fuera de
-# ese horario.
-_STOCKS_WINDOW_START = time(7, 30)
-_STOCKS_WINDOW_END = time(17, 0)
-
-# Mismos topes que execution/orchestrator.py -- importados, no copiados a
-# mano, para que el dashboard nunca pueda mostrar un limite desactualizado
-# si algun dia cambian alli.
-try:
-    from execution.orchestrator import MAX_DEPLOYED_PCT, MAX_OPEN_POSITIONS
-except Exception:
-    MAX_OPEN_POSITIONS, MAX_DEPLOYED_PCT = 12, 0.60
+# La ventana en la que TIENE sentido esperar que el pool de acciones haya
+# tickeado, para no marcarlo "stale" de noche o el fin de semana.
+#
+# Se expresa en hora de Nueva York, igual que _market_is_open() del
+# orchestrator. Antes era hora LOCAL de la maquina: en esta (UTC-5) la
+# ventana caia una hora corrida respecto del mercado, y si la maquina
+# cambia de zona horaria -- cosa que paso durante esta misma auditoria --
+# la ventana se mueve sola. Dashboard y bot tienen que estar de acuerdo
+# sobre cuando el mercado esta abierto (seccion 45).
+_NY = ZoneInfo("America/New_York")
+_STOCKS_WINDOW_START = time(9, 0)
+_STOCKS_WINDOW_END = time(16, 30)
 
 # Bajo esta cantidad de puntos, Sharpe/volatilidad/drawdown son ruido
 # estadistico, no una metrica -- se muestran como "N/A: falta historial"
@@ -59,6 +61,17 @@ def _age_minutes(iso_timestamp: str) -> float:
     return (datetime.now(timezone.utc) - ts).total_seconds() / 60
 
 
+def _within_stocks_window(now: datetime | None = None) -> bool:
+    """Si el mercado de acciones esta en horario habil, en la zona horaria
+    del mercado -- no en la de la maquina. Funcion aparte y con reloj
+    inyectable para que sea testeable sin depender de cuando corren los
+    tests ni de donde este la maquina."""
+    now_ny = (now or datetime.now(timezone.utc)).astimezone(_NY)
+    if now_ny.weekday() >= 5:
+        return False
+    return _STOCKS_WINDOW_START <= now_ny.time() < _STOCKS_WINDOW_END
+
+
 def _pool_health(decisions: list[dict], pool: str) -> dict:
     last = next((e for e in reversed(decisions) if e.get("pool") in (pool, "both") and "timestamp" in e), None)
     if not last:
@@ -68,8 +81,7 @@ def _pool_health(decisions: list[dict], pool: str) -> dict:
     if pool == "crypto":
         stale = age > 90  # ticks every 60min, 24/7
     else:
-        in_window = _STOCKS_WINDOW_START <= datetime.now().time() < _STOCKS_WINDOW_END
-        stale = age > 90 and in_window
+        stale = age > 90 and _within_stocks_window()
     return {"last_result": last.get("result"), "last_timestamp": last["timestamp"], "age_minutes": round(age, 1), "stale": stale}
 
 

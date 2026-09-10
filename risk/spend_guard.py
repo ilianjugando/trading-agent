@@ -14,6 +14,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from config.state_store import write_json_atomic
+
 
 class SpendLimitError(Exception):
     pass
@@ -41,7 +43,7 @@ class SpendGuard:
         return data
 
     def _save(self, data: dict) -> None:
-        self._state_file.write_text(json.dumps(data))
+        write_json_atomic(self._state_file, data)
 
     def check_and_record(self, usd_amount: float, pool_value: float) -> None:
         if usd_amount <= 0:
