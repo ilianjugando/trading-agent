@@ -128,6 +128,17 @@ def _evaluate_candidates(settings, scan_result, pool, pool_value, held, guard, p
     for candidate in scan_result.shortlist[:MAX_CANDIDATES_PER_CYCLE]:
         symbol = candidate.symbol
         if symbol in held:
+            # Visible, no silencioso: un "continue" sin loguear hacia
+            # capital_deployment_alert es indistinguible de "no se evaluo
+            # nada" -- medido en vivo (2026-09-10): 3 ciclos seguidos sin
+            # ninguna decision individual logueada, porque los 5 mejores
+            # candidatos eran justo las posiciones ya abiertas. La alerta
+            # decia "revisar umbral del panel, sizing o guards" cuando el
+            # sistema en realidad hizo lo correcto.
+            _log(settings.logs_dir, "decisions.log", {
+                "pool": pool, "symbol": symbol, "result": "skipped_already_held",
+                "reason": "ya es una posicion abierta -- no se vuelve a comprar",
+            })
             continue
 
         open_count = len(positions.all_open())
@@ -258,10 +269,19 @@ def _evaluate_candidates(settings, scan_result, pool, pool_value, held, guard, p
     return executed
 
 
-def _check_deployment_alert(settings, pool, scan_result, executed, pool_value) -> None:
+def _check_deployment_alert(settings, pool, scan_result, executed, pool_value, held) -> None:
     """Distingue "no habia oportunidades" de "el sistema no fue capaz de
     encontrarlas". Son cosas opuestas y en el log viejo se veian igual:
-    ambas eran silencio."""
+    ambas eran silencio.
+
+    Un tercer caso, encontrado con datos reales, necesitaba su propio
+    diagnostico: los mejores candidatos pueden ser exactamente las
+    posiciones que ya se tienen abiertas -- ahi no hay nada nuevo que
+    comprar, y eso no es una falla del sistema, es la regla de "no
+    recomprar lo que ya se tiene" funcionando como corresponde. Antes se
+    reportaba igual que un fallo real (SYSTEM_FAILED_TO_DEPLOY), lo que
+    mandaba a revisar "umbral del panel, sizing o guards" cuando no habia
+    nada que revisar ahi."""
     if executed > 0:
         return
 
@@ -273,9 +293,16 @@ def _check_deployment_alert(settings, pool, scan_result, executed, pool_value) -
         "rejection_reasons": scan_result.rejection_summary,
         "pool_value": round(pool_value, 2),
     }
+    top = scan_result.shortlist[:MAX_CANDIDATES_PER_CYCLE]
     if not scan_result.shortlist:
         alert["diagnosis"] = "NO_OPPORTUNITIES_FOUND"
         alert["detail"] = f"ninguno de los {scan_result.scanned} activos escaneados tuvo esperanza positiva"
+    elif top and all(c.symbol in held for c in top):
+        alert["diagnosis"] = "TOP_CANDIDATES_ALREADY_HELD"
+        alert["detail"] = (
+            f"los {len(top)} mejores candidatos (top: {top[0].symbol} score {top[0].score}) "
+            f"ya son posiciones abiertas -- nada nuevo que comprar este ciclo, no es una falla"
+        )
     else:
         best = scan_result.shortlist[0]
         alert["diagnosis"] = "SYSTEM_FAILED_TO_DEPLOY"
@@ -447,7 +474,7 @@ def run_stocks(settings) -> None:
             get_price=ibkr.get_last_price,
         )
 
-        _check_deployment_alert(settings, "stocks", scan_result, executed, pool_value)
+        _check_deployment_alert(settings, "stocks", scan_result, executed, pool_value, held)
 
     except TradingHalted as e:
         _log(settings.logs_dir, "decisions.log", {"pool": "stocks", "result": "halted", "reason": str(e)})
@@ -534,7 +561,7 @@ def run_crypto(settings) -> None:
         get_price=okx.get_last_price,
     )
 
-    _check_deployment_alert(settings, "crypto", scan_result, executed, pool_value)
+    _check_deployment_alert(settings, "crypto", scan_result, executed, pool_value, held)
 
 
 def main() -> int:
