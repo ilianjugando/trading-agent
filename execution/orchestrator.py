@@ -131,15 +131,28 @@ def _snapshot_portfolio(settings, pool: str, pool_value: float, positions) -> No
     poll del dashboard). Sin esto no existe ninguna base para el grafico de
     rendimiento, drawdown o volatilidad -- se escribe en cada ciclo,
     incluidos los que no compran nada, porque esos son la mayoria y son
-    los que realmente arman la curva."""
-    deployed = _deployed_usd(positions)
-    _log(settings.logs_dir, "portfolio_history.jsonl", {
-        "pool": pool,
-        "total_value": round(pool_value, 2),
-        "deployed": round(deployed, 2),
-        "cash": round(pool_value - deployed, 2),
-        "n_positions": len(positions.all_open()),
-    })
+    los que realmente arman la curva.
+
+    Nunca levanta: corre ANTES de gestionar salidas en las dos piernas, asi
+    que un fallo de escritura aca (disco lleno, permisos) se llevaria los
+    stop-loss del ciclo con el. Un punto perdido del grafico no vale una
+    posicion sin proteccion."""
+    try:
+        deployed = _deployed_usd(positions)
+        _log(settings.logs_dir, "portfolio_history.jsonl", {
+            "pool": pool,
+            "total_value": round(pool_value, 2),
+            "deployed": round(deployed, 2),
+            "cash": round(pool_value - deployed, 2),
+            "n_positions": len(positions.all_open()),
+        })
+    except Exception as e:
+        try:
+            _log(settings.logs_dir, "decisions.log", {
+                "pool": pool, "result": "portfolio_snapshot_error", "reason": str(e),
+            })
+        except Exception:
+            pass
 
 
 def _evaluate_candidates(settings, scan_result, pool, pool_value, held, guard, positions,
@@ -257,6 +270,7 @@ def _evaluate_candidates(settings, scan_result, pool, pool_value, held, guard, p
                 # se arma con tickers del mercado publico, pero las ordenes
                 # van al entorno demo, que no lista todos esos instrumentos
                 # (OKX 51001), incluidas las acciones tokenizadas tipo XMSTR.
+                guard.refund(size.usd)
                 _log(settings.logs_dir, "decisions.log", {
                     **decision_record, "result": "order_rejected", "reason": str(e),
                 })
@@ -274,6 +288,9 @@ def _evaluate_candidates(settings, scan_result, pool, pool_value, held, guard, p
             # como desplegado que en realidad esta libre.
             status = str(result.get("status", "")).lower()
             if any(word in status for word in ("cancel", "reject", "inactive", "error")):
+                # Misma devolucion que en el rechazo de arriba: una orden que
+                # el broker acepto pero no lleno tampoco gasto nada.
+                guard.refund(size.usd)
                 _log(settings.logs_dir, "decisions.log", {
                     **decision_record, "result": "order_not_filled", "status": result.get("status"),
                 })
@@ -489,7 +506,21 @@ def run_stocks(settings) -> None:
 
     ibkr = IBKRAdapter(settings.ibkr_host, settings.ibkr_port, settings.ibkr_client_id)
     try:
-        pool_value = ibkr.get_account_value()
+        try:
+            pool_value = ibkr.get_account_value()
+        except Exception as e:
+            # Sin pool_value no se puede dimensionar ni evaluar el corte, pero
+            # las SALIDAS no dependen de el: _loss_fraction devuelve None con 0
+            # y el breaker cuenta la perdida como material, que es el lado
+            # conservador. Antes esta excepcion (IBKR sin NetLiquidation, una
+            # sesion caida) subia hasta el finally y las posiciones abiertas se
+            # quedaban sin stop-loss ese ciclo: el mismo P0 que ya se corrigio
+            # dos veces por otras causas.
+            _log(settings.logs_dir, "decisions.log", {
+                "pool": "stocks", "result": "account_value_error", "reason": str(e),
+            })
+            _manage_stock_exits(settings, ibkr, positions, breaker, 0.0)
+            return
         _snapshot_portfolio(settings, "stocks", pool_value, positions)
 
         # Reconciliacion contra el broker (seccion 13). Solo compara y
@@ -617,7 +648,17 @@ def run_crypto(settings) -> None:
 
     okx = OKXAdapter(settings.okx_api_key, settings.okx_api_secret, settings.okx_api_passphrase, settings.okx_demo_flag)
 
-    equity = okx.get_equity()
+    try:
+        equity = okx.get_equity()
+    except Exception as e:
+        # Ver el comentario equivalente en run_stocks: get_equity son llamadas
+        # de red a OKX y estaba fuera de todo try, asi que una caida del
+        # exchange dejaba a las posiciones abiertas sin stop-loss.
+        _log(settings.logs_dir, "decisions.log", {
+            "pool": "crypto", "result": "equity_error", "reason": str(e),
+        })
+        _manage_crypto_exits(settings, okx, positions, breaker, 0.0)
+        return
     pool_value = equity["equity_usd"]
 
     # Reconciliacion contra el exchange (seccion 13): si la cuenta propia y

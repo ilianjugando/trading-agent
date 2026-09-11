@@ -66,3 +66,24 @@ class SpendGuard:
 
         state["spent"] += usd_amount
         self._save(state)
+
+    def refund(self, usd_amount: float) -> None:
+        """Devuelve al presupuesto diario lo que reservo una orden que
+        despues no se ejecuto.
+
+        check_and_record() suma ANTES de mandar la orden y tiene que seguir
+        siendo asi: reservar despues de ejecutar deja una ventana donde el
+        tope no existe. Pero sin esta devolucion, una orden que el broker
+        rechaza quemaba rotacion diaria que nunca se uso -- y unos cuantos
+        rechazos seguidos (un simbolo que el entorno demo no lista, un
+        ticker delistado) dejaban al bot sin presupuesto por el resto del
+        dia sin haber operado nada.
+        """
+        if usd_amount <= 0:
+            return
+        state = self._load()
+        # max(0) y no una resta pelada: si el archivo se reinicio por cambio
+        # de fecha entre la reserva y la devolucion, restar dejaria el gasto
+        # del dia en negativo, o sea presupuesto regalado.
+        state["spent"] = max(0.0, state["spent"] - usd_amount)
+        self._save(state)

@@ -8,6 +8,7 @@ from execution.orchestrator import (
     _evaluate_candidates,
     _manage_crypto_exits,
     _manage_stock_exits,
+    _snapshot_portfolio,
     _market_is_open,
 )
 from execution.positions import PositionTracker
@@ -356,3 +357,84 @@ def test_un_simbolo_sin_precio_no_saltea_el_stop_loss_del_siguiente(tmp_path):
     results = {d["result"] for d in _decisions(tmp_path)}
     assert "price_lookup_error" in results, "ABB tiene que quedar registrado, no silenciado"
     assert "stopped_out" in results
+
+
+def test_las_salidas_de_crypto_corren_aunque_get_equity_falle(tmp_path, monkeypatch):
+    """get_equity son llamadas de red y estaba fuera de todo try: una caida
+    de OKX mataba run_crypto ANTES de gestionar salidas, dejando cada
+    posicion abierta sin stop-loss ese ciclo."""
+    import execution.orchestrator as orch
+
+    calls = []
+
+    class _OKXCaido:
+        def __init__(self, *a, **kw):
+            pass
+
+        def get_equity(self):
+            raise ConnectionError("OKX no responde")
+
+    def _fake_exits(*a, **kw):
+        calls.append("exits")
+
+    def _explode(*a, **kw):
+        raise AssertionError("no se puede comprar sin saber el valor del pool")
+
+    monkeypatch.setattr(orch, "OKXAdapter", _OKXCaido)
+    monkeypatch.setattr(orch, "_manage_crypto_exits", _fake_exits)
+    monkeypatch.setattr(orch, "liquid_crypto_universe", _explode)
+
+    orch.run_crypto(_crypto_settings(tmp_path))
+
+    assert calls == ["exits"], "las salidas TIENEN que correr sin pool_value"
+    assert "equity_error" in [d.get("result") for d in _decisions(tmp_path)]
+
+
+def test_las_salidas_de_stocks_corren_aunque_falle_el_valor_de_la_cuenta(tmp_path, monkeypatch):
+    """Mismo P0 del lado de IBKR: get_account_value() levantaba y la
+    excepcion subia hasta el finally, sin pasar por las salidas."""
+    import execution.orchestrator as orch
+
+    calls = []
+
+    class _IBKRSinNetLiq:
+        def __init__(self, *a, **kw):
+            pass
+
+        def get_account_value(self):
+            raise RuntimeError("NetLiquidation not found in IBKR account summary")
+
+        def disconnect(self):
+            calls.append("disconnect")
+
+    monkeypatch.setattr(orch, "_market_is_open", lambda *a, **kw: True)
+    monkeypatch.setattr(orch, "IBKRAdapter", _IBKRSinNetLiq)
+    monkeypatch.setattr(orch, "_manage_stock_exits", lambda *a, **kw: calls.append("exits"))
+    monkeypatch.setattr(orch, "resolve_stock_universe",
+                        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("no se busca sin pool_value")))
+
+    settings = SimpleNamespace(
+        state_dir=tmp_path, logs_dir=tmp_path,
+        max_trade_pct=0.20, daily_loss_halt_pct=0.10, max_consecutive_losses=3,
+        ibkr_host="127.0.0.1", ibkr_port=4002, ibkr_client_id=1,
+        enable_kronos_forecast=False, gemini_api_key="", nvidia_api_key="",
+    )
+    orch.run_stocks(settings)
+
+    assert "exits" in calls, "las salidas TIENEN que correr sin pool_value"
+    assert "disconnect" in calls, "la conexion tiene que cerrarse igual"
+    assert "account_value_error" in [d.get("result") for d in _decisions(tmp_path)]
+
+
+def test_el_snapshot_del_portafolio_nunca_tumba_el_ciclo(tmp_path):
+    """Corre antes de las salidas en las dos piernas: si levantara, se
+    llevaria los stop-loss del ciclo. Un punto perdido del grafico no vale
+    una posicion sin proteccion."""
+
+    class _PositionsRotas:
+        def all_open(self):
+            raise OSError("disco lleno")
+
+    _snapshot_portfolio(_settings(tmp_path), "stocks", 1000.0, _PositionsRotas())
+
+    assert "portfolio_snapshot_error" in [d.get("result") for d in _decisions(tmp_path)]
