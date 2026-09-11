@@ -443,7 +443,7 @@ def backtest_payload(symbol: str, strategy: str, period: str = "2y") -> dict:
     """
     import yfinance as yf
 
-    from backtest.engine import replay_strategy, summarize
+    from backtest.engine import analyze, replay_strategy, summarize
     from signals.strategies import ALL_STRATEGIES
 
     from signals import custom
@@ -487,6 +487,7 @@ def backtest_payload(symbol: str, strategy: str, period: str = "2y") -> dict:
             "sortino": result.sortino,
             "calmar": result.calmar,
         },
+        "analytics": analyze(trades),
         "equity_curve": result.equity_curve,
         "bars": [
             {"time": times[i], "open": opens[i], "high": highs[i], "low": lows[i], "close": closes[i]}

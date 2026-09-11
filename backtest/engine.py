@@ -249,3 +249,57 @@ def walk_forward_crypto(closes_by_inst: dict[str, list[float]], bars_per_day_loo
             events.append(CryptoSignalEvent(hours_ago=n - 1 - i, inst_id=top.inst_id, change_24h_pct=top.change_24h_pct))
 
     return events
+
+
+def analyze(trades: list[BacktestTrade]) -> dict:
+    """Las estadisticas que dicen si una estrategia sirve, mas alla del
+    retorno total.
+
+    El retorno total esconde casi todo: no dice si viene de una sola
+    operacion afortunada, si las ganadoras compensan a las perdedoras, ni
+    cuantas perdidas seguidas hay que aguantar para llegar ahi.
+    """
+    closed = [t for t in trades if t.pnl_pct is not None]
+    if not closed:
+        return {"closed_trades": 0}
+
+    wins = [t.pnl_pct for t in closed if t.pnl_pct > 0]
+    losses = [t.pnl_pct for t in closed if t.pnl_pct <= 0]
+
+    # Rachas: cuantas perdidas seguidas hay que tolerar. Una estrategia
+    # rentable con 8 perdidas al hilo se abandona antes de que funcione.
+    best_streak = worst_streak = cur = 0
+    for t in closed:
+        if t.pnl_pct > 0:
+            cur = cur + 1 if cur > 0 else 1
+            best_streak = max(best_streak, cur)
+        else:
+            cur = cur - 1 if cur < 0 else -1
+            worst_streak = min(worst_streak, cur)
+
+    gross_win = sum(wins)
+    gross_loss = abs(sum(losses))
+    holding = [
+        int(t.exit_date) - int(t.entry_date)
+        for t in closed
+        if str(t.entry_date).isdigit() and str(t.exit_date or "").isdigit()
+    ]
+
+    return {
+        "closed_trades": len(closed),
+        "wins": len(wins),
+        "losses": len(losses),
+        "avg_win_pct": round(statistics.fmean(wins), 2) if wins else None,
+        "avg_loss_pct": round(statistics.fmean(losses), 2) if losses else None,
+        "best_pct": round(max(t.pnl_pct for t in closed), 2),
+        "worst_pct": round(min(t.pnl_pct for t in closed), 2),
+        # Cuanto gana por cada unidad que pierde. Debajo de 1 la estrategia
+        # pierde plata aunque acierte mas veces de las que falla.
+        "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else None,
+        # Lo que deja una operacion promedio. Es el numero que importa
+        # cuando se repite muchas veces.
+        "expectancy_pct": round(statistics.fmean([t.pnl_pct for t in closed]), 3),
+        "max_win_streak": best_streak,
+        "max_loss_streak": abs(worst_streak),
+        "avg_bars_held": round(statistics.fmean(holding), 1) if holding else None,
+    }

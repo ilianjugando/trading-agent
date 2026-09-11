@@ -259,11 +259,27 @@ class BacktestTradeRow(BaseModel):
     pnl_pct: float | None
 
 
+class BacktestAnalytics(BaseModel):
+    closed_trades: int
+    wins: int | None = None
+    losses: int | None = None
+    avg_win_pct: float | None = None
+    avg_loss_pct: float | None = None
+    best_pct: float | None = None
+    worst_pct: float | None = None
+    profit_factor: float | None = None
+    expectancy_pct: float | None = None
+    max_win_streak: int | None = None
+    max_loss_streak: int | None = None
+    avg_bars_held: float | None = None
+
+
 class BacktestRun(BaseModel):
     symbol: str
     strategy: str
     period: str
     metrics: BacktestMetrics
+    analytics: BacktestAnalytics
     equity_curve: list[float]
     bars: list[BacktestBar]
     trades: list[BacktestTradeRow]

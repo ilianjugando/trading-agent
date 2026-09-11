@@ -139,3 +139,38 @@ def test_metrics_are_none_instead_of_fake_precision_on_one_trade():
     r = summarize("test", "0", "1", [BacktestTrade("X", "0", 100.0, "1", 110.0, "target", 10.0)])
     assert r.sharpe is None and r.sortino is None
     assert r.total_return_pct == 10.0
+
+
+def test_analyze_surfaces_what_total_return_hides():
+    """El retorno total no dice si vino de una sola operacion afortunada,
+    ni cuantas perdidas seguidas hay que aguantar para llegar ahi."""
+    from backtest.engine import BacktestTrade, analyze
+
+    t = lambda p, a="0", b="3": BacktestTrade("X", a, 100.0, b, 100.0, "target", p)  # noqa: E731
+    r = analyze([t(10), t(-2), t(-2), t(-2), t(6)])
+
+    assert r["closed_trades"] == 5
+    assert r["wins"] == 2 and r["losses"] == 3
+    assert r["max_loss_streak"] == 3
+    assert r["best_pct"] == 10 and r["worst_pct"] == -2
+    assert r["profit_factor"] == round(16 / 6, 2)
+    assert r["expectancy_pct"] == 2.0
+
+
+def test_profit_factor_below_one_means_losing_despite_winning_often():
+    """Acertar mas veces de las que se falla no alcanza si las perdidas
+    son mas grandes que las ganancias."""
+    from backtest.engine import BacktestTrade, analyze
+
+    t = lambda p: BacktestTrade("X", "0", 100.0, "1", 100.0, "target", p)  # noqa: E731
+    r = analyze([t(1), t(1), t(1), t(-10)])
+
+    assert r["wins"] > r["losses"]
+    assert r["profit_factor"] < 1
+    assert r["expectancy_pct"] < 0
+
+
+def test_analyze_on_no_trades_is_not_an_error():
+    from backtest.engine import analyze
+
+    assert analyze([])["closed_trades"] == 0

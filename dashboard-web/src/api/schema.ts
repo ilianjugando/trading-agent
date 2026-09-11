@@ -248,6 +248,33 @@ export interface components {
             /** Resolved Pct */
             resolved_pct: number;
         };
+        /** BacktestAnalytics */
+        BacktestAnalytics: {
+            /** Closed Trades */
+            closed_trades: number;
+            /** Wins */
+            wins?: number | null;
+            /** Losses */
+            losses?: number | null;
+            /** Avg Win Pct */
+            avg_win_pct?: number | null;
+            /** Avg Loss Pct */
+            avg_loss_pct?: number | null;
+            /** Best Pct */
+            best_pct?: number | null;
+            /** Worst Pct */
+            worst_pct?: number | null;
+            /** Profit Factor */
+            profit_factor?: number | null;
+            /** Expectancy Pct */
+            expectancy_pct?: number | null;
+            /** Max Win Streak */
+            max_win_streak?: number | null;
+            /** Max Loss Streak */
+            max_loss_streak?: number | null;
+            /** Avg Bars Held */
+            avg_bars_held?: number | null;
+        };
         /** BacktestBar */
         BacktestBar: {
             /** Time */
@@ -287,6 +314,7 @@ export interface components {
             /** Period */
             period: string;
             metrics: components["schemas"]["BacktestMetrics"];
+            analytics: components["schemas"]["BacktestAnalytics"];
             /** Equity Curve */
             equity_curve: number[];
             /** Bars */

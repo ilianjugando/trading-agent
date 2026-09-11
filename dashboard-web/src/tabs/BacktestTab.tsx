@@ -230,12 +230,43 @@ export function BacktestTab() {
             <div className="mt-2 text-xs text-muted">▲ entrada · ▼ salida (verde ganadora, roja perdedora)</div>
           </Card>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+            <Card className="xl:col-span-1 lg:col-span-2">
               <SectionLabel>Curva de capital</SectionLabel>
               <EquityCurve curve={run.equity_curve} />
               <div className="mt-2 text-xs text-muted">Avanza por operación cerrada, no por tiempo.</div>
             </Card>
+            <Card>
+              <SectionLabel>Lo que el retorno total esconde</SectionLabel>
+              {(() => {
+                const a = run.analytics;
+                const rows: [string, string, string][] = [
+                  ["Ganadoras / perdedoras", `${a.wins ?? 0} / ${a.losses ?? 0}`, ""],
+                  ["Ganancia promedio", a.avg_win_pct !== null && a.avg_win_pct !== undefined ? pct(a.avg_win_pct, { showSign: true }) : "—", "text-accent"],
+                  ["Pérdida promedio", a.avg_loss_pct !== null && a.avg_loss_pct !== undefined ? pct(a.avg_loss_pct, { showSign: true }) : "—", "text-bad"],
+                  ["Mejor / peor", `${a.best_pct !== null && a.best_pct !== undefined ? pct(a.best_pct, { showSign: true }) : "—"} / ${a.worst_pct !== null && a.worst_pct !== undefined ? pct(a.worst_pct, { showSign: true }) : "—"}`, ""],
+                  ["Factor de ganancia", a.profit_factor !== null && a.profit_factor !== undefined ? num(a.profit_factor, 2) : "—", (a.profit_factor ?? 0) >= 1 ? "text-accent" : "text-bad"],
+                  ["Expectativa por operación", a.expectancy_pct !== null && a.expectancy_pct !== undefined ? pct(a.expectancy_pct, { showSign: true }) : "—", pnlClass(a.expectancy_pct)],
+                  ["Racha máx. ganadora", `${a.max_win_streak ?? 0}`, ""],
+                  ["Racha máx. perdedora", `${a.max_loss_streak ?? 0}`, "text-bad"],
+                  ["Barras promedio en posición", a.avg_bars_held !== null && a.avg_bars_held !== undefined ? num(a.avg_bars_held, 1) : "—", ""],
+                ];
+                return (
+                  <div className="flex flex-col gap-1.5">
+                    {rows.map(([label, value, cls]) => (
+                      <div key={label} className="flex items-center justify-between gap-3 border-b border-border py-1.5 last:border-0">
+                        <span className="text-sm text-muted">{label}</span>
+                        <span className={`font-mono text-sm ${cls}`}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+              <div className="mt-3 text-xs text-muted">
+                Factor de ganancia debajo de 1 = pierde plata aunque acierte más veces de las que falla.
+              </div>
+            </Card>
+
             <Card>
               <SectionLabel>Cómo salió de cada operación</SectionLabel>
               {(() => {
