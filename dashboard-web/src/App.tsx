@@ -10,6 +10,7 @@ import { RiskTab } from "./tabs/RiskTab";
 import { TradesTab } from "./tabs/TradesTab";
 import { StrategiesTab } from "./tabs/StrategiesTab";
 import { RadarTab } from "./tabs/RadarTab";
+import { BacktestTab } from "./tabs/BacktestTab";
 
 const TABS = [
   { value: "overview", label: "Overview" },
@@ -20,6 +21,7 @@ const TABS = [
   { value: "risk", label: "Riesgo" },
   { value: "trades", label: "Trades" },
   { value: "strategies", label: "Estrategias" },
+  { value: "backtest", label: "Backtest" },
 ] as const;
 
 const TAB_TRIGGER_CLASS =
@@ -66,6 +68,11 @@ export default function App() {
             cargando, en vez de quedar bloqueado por eso. */}
         <Tabs.Content value="radar">
           <RadarTab />
+        </Tabs.Content>
+
+        {/* Como el radar: fetch propio y bajo demanda, no atado al poll de /data. */}
+        <Tabs.Content value="backtest">
+          <BacktestTab />
         </Tabs.Content>
 
         {!data ? (

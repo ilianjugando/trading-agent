@@ -127,6 +127,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/backtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backtest
+         * @description Replay de una estrategia sobre historia real. Sin LLM y sin ordenes.
+         */
+        get: operations["get_backtest_backtest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/market-radar": {
         parameters: {
             query?: never;
@@ -170,6 +190,69 @@ export interface components {
             sample_size: number;
             /** Resolved Pct */
             resolved_pct: number;
+        };
+        /** BacktestBar */
+        BacktestBar: {
+            /** Time */
+            time: number;
+            /** Open */
+            open: number;
+            /** High */
+            high: number;
+            /** Low */
+            low: number;
+            /** Close */
+            close: number;
+        };
+        /** BacktestMetrics */
+        BacktestMetrics: {
+            /** Closed Trades */
+            closed_trades: number;
+            /** Total Return Pct */
+            total_return_pct: number;
+            /** Max Drawdown Pct */
+            max_drawdown_pct: number;
+            /** Win Rate */
+            win_rate: number | null;
+            /** Sharpe */
+            sharpe: number | null;
+            /** Sortino */
+            sortino: number | null;
+            /** Calmar */
+            calmar: number | null;
+        };
+        /** BacktestRun */
+        BacktestRun: {
+            /** Symbol */
+            symbol: string;
+            /** Strategy */
+            strategy: string;
+            /** Period */
+            period: string;
+            metrics: components["schemas"]["BacktestMetrics"];
+            /** Equity Curve */
+            equity_curve: number[];
+            /** Bars */
+            bars: components["schemas"]["BacktestBar"][];
+            /** Trades */
+            trades: components["schemas"]["BacktestTradeRow"][];
+            /** Available Strategies */
+            available_strategies: string[];
+        };
+        /** BacktestTradeRow */
+        BacktestTradeRow: {
+            /** Entry Time */
+            entry_time: number | null;
+            /** Entry Price */
+            entry_price: number;
+            /** Exit Time */
+            exit_time: number | null;
+            /** Exit Price */
+            exit_price: number | null;
+            /** Exit Reason */
+            exit_reason: string | null;
+            /** Pnl Pct */
+            pnl_pct: number | null;
         };
         /** Breaker */
         Breaker: {
@@ -756,6 +839,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KillSwitchStatus"];
+                };
+            };
+        };
+    };
+    get_backtest_backtest_get: {
+        parameters: {
+            query?: {
+                symbol?: string;
+                strategy?: string;
+                period?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestRun"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

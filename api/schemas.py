@@ -232,6 +232,44 @@ class KillSwitchRequest(BaseModel):
     pools: list[str] | None = None
 
 
+class BacktestMetrics(BaseModel):
+    closed_trades: int
+    total_return_pct: float
+    max_drawdown_pct: float
+    win_rate: float | None
+    sharpe: float | None
+    sortino: float | None
+    calmar: float | None
+
+
+class BacktestBar(BaseModel):
+    time: int
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+class BacktestTradeRow(BaseModel):
+    entry_time: int | None
+    entry_price: float
+    exit_time: int | None
+    exit_price: float | None
+    exit_reason: str | None
+    pnl_pct: float | None
+
+
+class BacktestRun(BaseModel):
+    symbol: str
+    strategy: str
+    period: str
+    metrics: BacktestMetrics
+    equity_curve: list[float]
+    bars: list[BacktestBar]
+    trades: list[BacktestTradeRow]
+    available_strategies: list[str]
+
+
 class Mover(BaseModel):
     symbol: str
     exchange: str

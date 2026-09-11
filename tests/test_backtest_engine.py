@@ -90,3 +90,52 @@ def test_walk_forward_crypto_picks_strongest_momentum():
 def test_walk_forward_crypto_empty_when_too_short():
     events = walk_forward_crypto({"BTC-USDT": [100.0] * 5}, bars_per_day_lookback=24)
     assert events == []
+
+
+def test_replay_uses_only_past_bars_and_the_live_stop_rule():
+    """Dos cosas que si se rompen dan una curva linda y falsa: mirar al
+    futuro, y usar un stop distinto al que usa el bot en vivo."""
+    from backtest.engine import replay_strategy, summarize
+
+    seen = []
+
+    def _spy(window):
+        seen.append(len(window))
+        return None  # nunca compra: solo se observa que ve
+
+    closes = [100 + i for i in range(80)]
+    replay_strategy(closes, _spy, warmup=35)
+
+    assert seen[0] == 36, "la primera ventana arranca en warmup"
+    assert seen == sorted(seen), "la ventana solo crece"
+    assert max(seen) == len(closes), "nunca ve mas barras de las que existen"
+
+
+def test_replay_closes_a_trade_and_summarize_reports_real_metrics():
+    import math
+
+    from signals.strategies import trend_follow
+
+    from backtest.engine import replay_strategy, summarize
+
+    # Tendencia alcista con retrocesos: esperanza positiva (si fuera una
+    # caida monotona el filtro de EV la rechazaria, con razon).
+    closes = [100 * (1.004 ** i) + 9 * math.sin(i / 3.0) for i in range(220)]
+    trades = replay_strategy(closes, trend_follow, symbol="TEST")
+    r = summarize("test", "0", "99", trades)
+
+    assert trades, "la estrategia tenia que disparar en esa caida"
+    assert all(t.exit_reason in ("stop_loss", "target", "end_of_window") for t in trades)
+    assert r.equity_curve[0] == 100.0
+    assert len(r.equity_curve) == len([t for t in trades if t.pnl_pct is not None]) + 1
+
+
+def test_metrics_are_none_instead_of_fake_precision_on_one_trade():
+    """Con una sola operacion no hay dispersion que medir. Un Sharpe
+    inventado sobre n=1 es exactamente el numero que hace que una curva
+    mediocre parezca profesional."""
+    from backtest.engine import BacktestTrade, summarize
+
+    r = summarize("test", "0", "1", [BacktestTrade("X", "0", 100.0, "1", 110.0, "target", 10.0)])
+    assert r.sharpe is None and r.sortino is None
+    assert r.total_return_pct == 10.0

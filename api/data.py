@@ -432,3 +432,66 @@ def build_data() -> dict:
     }
     _cache["key"], _cache["data"] = key, data
     return data
+
+
+def backtest_payload(symbol: str, strategy: str, period: str = "2y") -> dict:
+    """Backtest de una estrategia sobre un simbolo, listo para graficar.
+
+    Import local de yfinance a proposito: este modulo lo carga el dashboard
+    en cada arranque y no puede pagar esa dependencia solo porque exista
+    esta ruta.
+    """
+    import yfinance as yf
+
+    from backtest.engine import replay_strategy, summarize
+    from signals.strategies import ALL_STRATEGIES
+
+    fn = ALL_STRATEGIES.get(strategy)
+    if fn is None:
+        raise ValueError(f"estrategia desconocida: {strategy!r}. Validas: {sorted(ALL_STRATEGIES)}")
+
+    hist = yf.Ticker(symbol).history(period=period)
+    if hist.empty or "Close" not in hist:
+        raise ValueError(f"sin datos de mercado para {symbol!r}")
+
+    closes = [float(x) for x in hist["Close"]]
+    highs = [float(x) for x in hist["High"]]
+    lows = [float(x) for x in hist["Low"]]
+    opens = [float(x) for x in hist["Open"]]
+    times = [int(ts.timestamp()) for ts in hist.index]
+
+    trades = replay_strategy(closes, fn, symbol=symbol, highs=highs, lows=lows)
+    result = summarize("stocks", str(times[0]), str(times[-1]), trades)
+
+    def _t(idx: str | None) -> int | None:
+        i = int(idx) if idx is not None else None
+        return times[i] if i is not None and 0 <= i < len(times) else None
+
+    return {
+        "symbol": symbol,
+        "strategy": strategy,
+        "period": period,
+        "metrics": {
+            "closed_trades": len([t for t in trades if t.pnl_pct is not None]),
+            "total_return_pct": result.total_return_pct,
+            "max_drawdown_pct": result.max_drawdown_pct,
+            "win_rate": result.win_rate,
+            "sharpe": result.sharpe,
+            "sortino": result.sortino,
+            "calmar": result.calmar,
+        },
+        "equity_curve": result.equity_curve,
+        "bars": [
+            {"time": times[i], "open": opens[i], "high": highs[i], "low": lows[i], "close": closes[i]}
+            for i in range(len(times))
+        ],
+        "trades": [
+            {
+                "entry_time": _t(t.entry_date), "entry_price": t.entry_price,
+                "exit_time": _t(t.exit_date), "exit_price": t.exit_price,
+                "exit_reason": t.exit_reason, "pnl_pct": t.pnl_pct,
+            }
+            for t in trades
+        ],
+        "available_strategies": sorted(ALL_STRATEGIES),
+    }

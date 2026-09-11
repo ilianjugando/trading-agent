@@ -12,6 +12,7 @@ export type PortfolioPoint = components["schemas"]["PortfolioPoint"];
 export type Mover = components["schemas"]["Mover"];
 export type DexMover = components["schemas"]["DexMover"];
 export type MarketRadar = components["schemas"]["MarketRadar"];
+export type BacktestRun = components["schemas"]["BacktestRun"];
 export type RawLog = Record<string, unknown>;
 
 async function getJSON<T>(path: string): Promise<T> {
@@ -32,6 +33,8 @@ export const api = {
   botStart: () => postJSON<TaskStatusResponse>("/bot-start"),
   botStop: () => postJSON<TaskStatusResponse>("/bot-stop"),
   marketRadar: () => getJSON<MarketRadar>("/market-radar"),
+  backtest: (symbol: string, strategy: string, period: string) =>
+    getJSON<BacktestRun>(`/backtest?symbol=${encodeURIComponent(symbol)}&strategy=${encodeURIComponent(strategy)}&period=${encodeURIComponent(period)}`),
 };
 
 /** Un pool en discovery/scan es un pase directo de decisions.log, forma

@@ -28,12 +28,12 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import bot_control, data
-from api.schemas import DashboardData, KillSwitchRequest, KillSwitchStatus, MarketRadar, TaskStatusResponse
+from api.schemas import BacktestRun, DashboardData, KillSwitchRequest, KillSwitchStatus, MarketRadar, TaskStatusResponse
 from risk import kill_switch
 from signals import market_radar
 
@@ -94,6 +94,15 @@ def _kill_switch_status() -> dict:
         "stocks_blocked": kill_switch.blocked_reason(data.STATE_DIR, "stocks"),
         "crypto_blocked": kill_switch.blocked_reason(data.STATE_DIR, "crypto"),
     }
+
+
+@app.get("/backtest", response_model=BacktestRun)
+def get_backtest(symbol: str = "SPY", strategy: str = "trend_follow", period: str = "2y") -> dict:
+    """Replay de una estrategia sobre historia real. Sin LLM y sin ordenes."""
+    try:
+        return data.backtest_payload(symbol.upper().strip(), strategy, period)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/market-radar", response_model=MarketRadar)
