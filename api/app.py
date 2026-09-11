@@ -25,19 +25,50 @@ el proxy de Vite habla directo con este servidor, asi que no hace falta
 CORS en ningun caso.
 """
 import time
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import bot_control, data
+from api.mcp_server import mcp as _mcp
 from api.schemas import BacktestRun, CustomStrategy, CustomStrategyList, DashboardData, KillSwitchRequest, KillSwitchStatus, MarketRadar, TaskStatusResponse
 from risk import kill_switch
 from signals import market_radar
 
-app = FastAPI(title="Trading Agent API", version="1.0.0")
+# El servidor MCP vive en el mismo proceso: es lo que hace que el bot
+# aparezca como herramientas dentro de Claude, ChatGPT, Cursor o Gemini.
+# Ver api/mcp_server.py para que se expone y, sobre todo, que NO.
+#
+# streamable_http_path="/" para que la URL final sea /mcp y no /mcp/mcp.
+# stateless porque cada herramienta es una consulta independiente: no hay
+# conversacion que sostener entre llamadas, y sin sesion el endpoint
+# sobrevive a que el cliente se reconecte.
+_mcp_app = _mcp.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Sin esto el sub-app monta pero explota en la primera llamada con
+    # "Task group is not initialized": FastAPI no corre el lifespan de un
+    # app montado, hay que encadenarlo a mano.
+    async with _mcp_app.router.lifespan_context(_mcp_app):
+        yield
+
+
+app = FastAPI(title="Trading Agent API", version="1.0.0", lifespan=_lifespan)
+app.mount("/mcp", _mcp_app)
+
+
+# Starlette monta en "/mcp/..." y no matchea "/mcp" pelado, que es
+# justamente como la mayoria de los clientes configuran la URL. Sin esto
+# el catch-all del frontend lo agarra y devuelve 405.
+@app.api_route("/mcp", methods=["GET", "POST", "DELETE"], include_in_schema=False)
+async def _mcp_no_trailing_slash(request: Request) -> Response:
+    return await _mcp_app(request.scope | {"path": "/", "raw_path": b"/"}, request.receive, request._send)
 
 _DIST_DIR = Path(__file__).resolve().parent.parent / "dashboard-web" / "dist"
 
@@ -49,12 +80,12 @@ _RADAR_CACHE_SECONDS = 60
 _radar_cache: dict = {"ts": 0.0, "data": None}
 
 
-@app.get("/data", response_model=DashboardData)
+@app.get("/data", response_model=DashboardData, operation_id="estado_del_bot")
 def get_data() -> dict:
     return data.build_data()
 
 
-@app.get("/bot-status", response_model=TaskStatusResponse)
+@app.get("/bot-status", response_model=TaskStatusResponse, operation_id="estado_de_las_tareas")
 def get_bot_status() -> dict:
     return {"tasks": bot_control.task_statuses()}
 
@@ -64,17 +95,17 @@ def post_bot_start() -> dict:
     return {"tasks": bot_control.set_tasks_enabled(True)}
 
 
-@app.post("/bot-stop", response_model=TaskStatusResponse)
+@app.post("/bot-stop", response_model=TaskStatusResponse, operation_id="detener_el_bot")
 def post_bot_stop() -> dict:
     return {"tasks": bot_control.set_tasks_enabled(False)}
 
 
-@app.get("/kill-switch", response_model=KillSwitchStatus)
+@app.get("/kill-switch", response_model=KillSwitchStatus, operation_id="estado_del_corte")
 def get_kill_switch() -> dict:
     return _kill_switch_status()
 
 
-@app.post("/kill-switch/engage", response_model=KillSwitchStatus)
+@app.post("/kill-switch/engage", response_model=KillSwitchStatus, operation_id="accionar_el_corte")
 def post_kill_switch_engage(body: KillSwitchRequest | None = None) -> dict:
     """Corta la apertura de posiciones NUEVAS. Las salidas (stop-loss)
     siguen ejecutandose siempre -- ver risk/kill_switch.py."""
@@ -96,7 +127,7 @@ def _kill_switch_status() -> dict:
     }
 
 
-@app.get("/backtest", response_model=BacktestRun)
+@app.get("/backtest", response_model=BacktestRun, operation_id="backtest")
 def get_backtest(symbol: str = "SPY", strategy: str = "trend_follow", period: str = "2y") -> dict:
     """Replay de una estrategia sobre historia real. Sin LLM y sin ordenes."""
     try:
@@ -105,7 +136,7 @@ def get_backtest(symbol: str = "SPY", strategy: str = "trend_follow", period: st
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@app.get("/strategies/custom", response_model=CustomStrategyList)
+@app.get("/strategies/custom", response_model=CustomStrategyList, operation_id="listar_estrategias")
 def get_custom_strategies() -> dict:
     from signals.custom import INDICATORS, OPS, load_all
 
@@ -142,7 +173,7 @@ def delete_custom_strategy(name: str) -> dict:
     return get_custom_strategies()
 
 
-@app.get("/market-radar", response_model=MarketRadar)
+@app.get("/market-radar", response_model=MarketRadar, operation_id="radar_de_mercado")
 def get_market_radar() -> dict:
     """Puramente informativo -- ver signals/market_radar.py. No alimenta
     ninguna decision de compra."""
@@ -161,6 +192,7 @@ def get_market_radar() -> dict:
     }
     _radar_cache["ts"], _radar_cache["data"] = now, result
     return result
+
 
 
 # Deliberadamente NO se monta StaticFiles en "/": un Mount ahi es un

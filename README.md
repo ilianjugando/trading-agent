@@ -328,3 +328,22 @@ Then set `ENABLE_KRONOS_FORECAST=true` in `.env`. First run downloads
 ~small model weights from Hugging Face Hub and caches them locally;
 after that, one forecast takes a few seconds on CPU — comfortably inside
 the 30-60min scheduled-run budget.
+
+## Usar el bot desde un cliente de IA (MCP)
+
+El servidor MCP corre dentro del mismo proceso que el dashboard. Con
+`uvicorn api.app:app --port 8787` levantado, la URL es:
+
+    http://127.0.0.1:8787/mcp
+
+En Claude Code: `claude mcp add --transport http trading-agent http://127.0.0.1:8787/mcp`
+
+Herramientas disponibles: `resumen_de_cartera`, `posiciones_abiertas`,
+`actividad_reciente`, `correr_backtest`, `listar_estrategias`,
+`estado_del_corte`, `accionar_corte_de_emergencia`, `detener_el_bot`.
+
+**Lo que NO se puede hacer por MCP, a propósito:** arrancar el bot,
+levantar el corte de emergencia o crear estrategias. Un cliente de IA
+puede ver todo y puede *parar* la operativa; no puede iniciarla ni crear
+algo que opere solo. Esa asimetría es deliberada — ver el docstring de
+`api/mcp_server.py`.
