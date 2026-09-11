@@ -270,6 +270,24 @@ class BacktestRun(BaseModel):
     available_strategies: list[str]
 
 
+class StrategyRule(BaseModel):
+    indicator: str
+    op: str
+    value: float | str | bool
+
+
+class CustomStrategy(BaseModel):
+    name: str
+    entry: list[StrategyRule]
+    description: str = ""
+
+
+class CustomStrategyList(BaseModel):
+    strategies: list[CustomStrategy]
+    available_indicators: list[str]
+    available_operators: list[str]
+
+
 class Mover(BaseModel):
     symbol: str
     exchange: str

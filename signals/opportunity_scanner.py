@@ -119,7 +119,8 @@ def _score(asym: asymmetry_mod.Asymmetry, strategies: list[str], rsi_value: floa
     return round(total, 2), {k: round(v, 2) for k, v in parts.items()}
 
 
-def scan(price_data: dict[str, dict], min_expected_value_pct: float = 0.0) -> ScanResult:
+def scan(price_data: dict[str, dict], min_expected_value_pct: float = 0.0,
+         extra_strategies: dict | None = None) -> ScanResult:
     """Puntua todo el universo.
 
     `price_data[symbol]` acepta: `closes` (obligatorio), y opcionalmente
@@ -169,7 +170,7 @@ def scan(price_data: dict[str, dict], min_expected_value_pct: float = 0.0) -> Sc
             })
             continue
 
-        strategies = [p.strategy for p in evaluate_all(closes, on_error=_note_strategy_error)]
+        strategies = [p.strategy for p in evaluate_all(closes, on_error=_note_strategy_error, extra=extra_strategies)]
         rsi_value = rsi(closes)
         trend = sma_trend(closes)
         score, breakdown = _score(asym, strategies, rsi_value, trend)

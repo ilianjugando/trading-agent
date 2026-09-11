@@ -446,9 +446,16 @@ def backtest_payload(symbol: str, strategy: str, period: str = "2y") -> dict:
     from backtest.engine import replay_strategy, summarize
     from signals.strategies import ALL_STRATEGIES
 
-    fn = ALL_STRATEGIES.get(strategy)
-    if fn is None:
-        raise ValueError(f"estrategia desconocida: {strategy!r}. Validas: {sorted(ALL_STRATEGIES)}")
+    from signals import custom
+
+    custom_specs = custom.load_all(STATE_DIR)
+    if strategy in ALL_STRATEGIES:
+        fn = ALL_STRATEGIES[strategy]
+    elif strategy in custom_specs:
+        fn = custom_specs[strategy].as_fn()
+    else:
+        valid = sorted(set(ALL_STRATEGIES) | set(custom_specs))
+        raise ValueError(f"estrategia desconocida: {strategy!r}. Validas: {valid}")
 
     hist = yf.Ticker(symbol).history(period=period)
     if hist.empty or "Close" not in hist:
@@ -493,5 +500,5 @@ def backtest_payload(symbol: str, strategy: str, period: str = "2y") -> dict:
             }
             for t in trades
         ],
-        "available_strategies": sorted(ALL_STRATEGIES),
+        "available_strategies": sorted(set(ALL_STRATEGIES) | set(custom_specs)),
     }

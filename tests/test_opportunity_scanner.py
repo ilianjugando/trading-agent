@@ -119,7 +119,7 @@ def test_a_broken_strategy_is_reported_not_silently_ignored(monkeypatch):
         raise ZeroDivisionError("division por cero en la estrategia")
 
     monkeypatch.setattr(scanner, "evaluate_all",
-                        lambda closes, on_error=None: (on_error("rota", ZeroDivisionError("division por cero")) or []) if on_error else [])
+                        lambda closes, on_error=None, extra=None: (on_error("rota", ZeroDivisionError("division por cero")) or []) if on_error else [])
 
     result = scanner.scan({"ALCISTA": {"closes": _rising()}})
 

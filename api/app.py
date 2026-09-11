@@ -33,7 +33,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import bot_control, data
-from api.schemas import BacktestRun, DashboardData, KillSwitchRequest, KillSwitchStatus, MarketRadar, TaskStatusResponse
+from api.schemas import BacktestRun, CustomStrategy, CustomStrategyList, DashboardData, KillSwitchRequest, KillSwitchStatus, MarketRadar, TaskStatusResponse
 from risk import kill_switch
 from signals import market_radar
 
@@ -103,6 +103,43 @@ def get_backtest(symbol: str = "SPY", strategy: str = "trend_follow", period: st
         return data.backtest_payload(symbol.upper().strip(), strategy, period)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/strategies/custom", response_model=CustomStrategyList)
+def get_custom_strategies() -> dict:
+    from signals.custom import INDICATORS, OPS, load_all
+
+    specs = load_all(data.STATE_DIR)
+    return {
+        "strategies": [{"name": s.name, "entry": [asdict(r) for r in s.entry], "description": s.description}
+                       for s in specs.values()],
+        "available_indicators": sorted(INDICATORS),
+        "available_operators": sorted(OPS),
+    }
+
+
+@app.post("/strategies/custom", response_model=CustomStrategyList)
+def post_custom_strategy(body: CustomStrategy) -> dict:
+    from signals.custom import Rule, StrategySpec, save
+
+    try:
+        save(data.STATE_DIR, StrategySpec(
+            name=body.name,
+            entry=[Rule(r.indicator, r.op, r.value) for r in body.entry],
+            description=body.description,
+        ))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return get_custom_strategies()
+
+
+@app.delete("/strategies/custom/{name}", response_model=CustomStrategyList)
+def delete_custom_strategy(name: str) -> dict:
+    from signals.custom import delete
+
+    if not delete(data.STATE_DIR, name):
+        raise HTTPException(status_code=404, detail=f"no existe la estrategia {name!r}")
+    return get_custom_strategies()
 
 
 @app.get("/market-radar", response_model=MarketRadar)

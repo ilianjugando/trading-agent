@@ -147,6 +147,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/strategies/custom": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Custom Strategies */
+        get: operations["get_custom_strategies_strategies_custom_get"];
+        put?: never;
+        /** Post Custom Strategy */
+        post: operations["post_custom_strategy_strategies_custom_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategies/custom/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Custom Strategy */
+        delete: operations["delete_custom_strategy_strategies_custom__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/market-radar": {
         parameters: {
             query?: never;
@@ -289,6 +324,27 @@ export interface components {
             position_usd: number | null;
             /** Reasoning */
             reasoning: string | null;
+        };
+        /** CustomStrategy */
+        CustomStrategy: {
+            /** Name */
+            name: string;
+            /** Entry */
+            entry: components["schemas"]["StrategyRule"][];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+        };
+        /** CustomStrategyList */
+        CustomStrategyList: {
+            /** Strategies */
+            strategies: components["schemas"]["CustomStrategy"][];
+            /** Available Indicators */
+            available_indicators: string[];
+            /** Available Operators */
+            available_operators: string[];
         };
         /** DashboardData */
         DashboardData: {
@@ -629,6 +685,15 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** StrategyRule */
+        StrategyRule: {
+            /** Indicator */
+            indicator: string;
+            /** Op */
+            op: string;
+            /** Value */
+            value: number | string | boolean;
+        };
         /** TaskStatusResponse */
         TaskStatusResponse: {
             /** Tasks */
@@ -863,6 +928,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BacktestRun"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_custom_strategies_strategies_custom_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomStrategyList"];
+                };
+            };
+        };
+    };
+    post_custom_strategy_strategies_custom_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomStrategy"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomStrategyList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_custom_strategy_strategies_custom__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomStrategyList"];
                 };
             };
             /** @description Validation Error */

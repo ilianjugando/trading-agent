@@ -4,6 +4,7 @@ import type { BacktestRun } from "../api/client";
 import { api } from "../api/client";
 import { Card, EmptyState, SectionLabel, StatTile, Table, Td, Th } from "../components/primitives";
 import { num, pct, pnlClass } from "../lib/format";
+import { StrategyBuilder } from "./StrategyBuilder";
 
 const PERIODS = ["6mo", "1y", "2y", "5y"];
 
@@ -83,8 +84,15 @@ export function BacktestTab() {
   const [run, setRun] = useState<BacktestRun | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [builderKey, setBuilderKey] = useState(0);
 
-  const strategies = run?.available_strategies ?? ["breakout", "mean_reversion", "momentum", "trend_follow"];
+  const [strategies, setStrategies] = useState<string[]>(["breakout", "mean_reversion", "momentum", "trend_follow"]);
+
+  useEffect(() => {
+    api.customStrategies()
+      .then((r) => setStrategies([...new Set([...["breakout", "mean_reversion", "momentum", "trend_follow"], ...r.strategies.map((s) => s.name)])].sort()))
+      .catch(() => {});
+  }, [builderKey]);
 
   async function go() {
     setLoading(true);
@@ -223,6 +231,7 @@ export function BacktestTab() {
           </Card>
         </>
       )}
+      <StrategyBuilder key={builderKey} onChanged={() => setBuilderKey((k) => k + 1)} />
     </div>
   );
 }

@@ -75,7 +75,7 @@ ALL_STRATEGIES = {
 }
 
 
-def evaluate_all(closes: list[float], on_error=None) -> list[Proposal]:
+def evaluate_all(closes: list[float], on_error=None, extra: dict | None = None) -> list[Proposal]:
     """Every strategy's verdict on one symbol. Strategies that decline
     simply don't appear -- a quiet strategy is a valid outcome, and
     forcing every one to fire on every bar is how you get noise.
@@ -88,7 +88,9 @@ def evaluate_all(closes: list[float], on_error=None) -> list[Proposal]:
     que el llamador lo registre; sin el, el comportamiento es el de antes.
     """
     out = []
-    for name, fn in ALL_STRATEGIES.items():
+    # `extra` son las estrategias custom (signals/custom.py): mismas
+    # funciones, mismo tratamiento, misma puntuacion de confluencia.
+    for name, fn in {**ALL_STRATEGIES, **(extra or {})}.items():
         try:
             proposal = fn(closes)
         except Exception as e:

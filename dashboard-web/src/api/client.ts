@@ -13,6 +13,9 @@ export type Mover = components["schemas"]["Mover"];
 export type DexMover = components["schemas"]["DexMover"];
 export type MarketRadar = components["schemas"]["MarketRadar"];
 export type BacktestRun = components["schemas"]["BacktestRun"];
+export type CustomStrategy = components["schemas"]["CustomStrategy"];
+export type CustomStrategyList = components["schemas"]["CustomStrategyList"];
+export type StrategyRule = components["schemas"]["StrategyRule"];
 export type RawLog = Record<string, unknown>;
 
 async function getJSON<T>(path: string): Promise<T> {
@@ -21,9 +24,13 @@ async function getJSON<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function postJSON<T>(path: string): Promise<T> {
-  const res = await fetch(path, { method: "POST" });
-  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+async function postJSON<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { detail?: string } | null)?.detail ?? `${path} -> ${res.status}`);
   return res.json() as Promise<T>;
 }
 
@@ -33,6 +40,13 @@ export const api = {
   botStart: () => postJSON<TaskStatusResponse>("/bot-start"),
   botStop: () => postJSON<TaskStatusResponse>("/bot-stop"),
   marketRadar: () => getJSON<MarketRadar>("/market-radar"),
+  customStrategies: () => getJSON<CustomStrategyList>("/strategies/custom"),
+  saveStrategy: (s: CustomStrategy) => postJSON<CustomStrategyList>("/strategies/custom", s),
+  deleteStrategy: async (name: string) => {
+    const res = await fetch(`/strategies/custom/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`delete -> ${res.status}`);
+    return res.json() as Promise<CustomStrategyList>;
+  },
   backtest: (symbol: string, strategy: string, period: string) =>
     getJSON<BacktestRun>(`/backtest?symbol=${encodeURIComponent(symbol)}&strategy=${encodeURIComponent(strategy)}&period=${encodeURIComponent(period)}`),
 };

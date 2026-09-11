@@ -34,6 +34,7 @@ from signals.crypto_fundamentals import (
     fetch_meme_coin_symbols,
     okx_inst_id_to_symbol,
 )
+from signals import custom as custom_strategies
 from signals.crypto_trend import liquid_universe as liquid_crypto_universe
 from signals.darvas import compute_box
 from signals.opportunity_scanner import scan
@@ -104,6 +105,19 @@ MAX_DEPLOYED_PCT = limits.MAX_DEPLOYED_PCT
 # siempre nuestro numero; es el punto donde la diferencia deja de ser
 # redondeo y pasa a merecer que un humano la mire.
 EQUITY_DIVERGENCE_ALERT_PCT = 1.0
+
+
+def _custom_fns(settings) -> dict:
+    """Estrategias custom del usuario (signals/custom.py) como funciones
+    normales. Un archivo roto no puede tumbar el ciclo: se sigue con las
+    que vienen en el codigo."""
+    try:
+        return {name: spec.as_fn() for name, spec in custom_strategies.load_all(settings.state_dir).items()}
+    except Exception as e:
+        _log(settings.logs_dir, "decisions.log", {
+            "result": "custom_strategies_error", "reason": str(e),
+        })
+        return {}
 
 
 def _deployed_usd(positions) -> float:
@@ -512,7 +526,7 @@ def run_stocks(settings) -> None:
                 "stock_strategies": stock_signals,
             }
 
-        scan_result = scan(price_data)
+        scan_result = scan(price_data, extra_strategies=_custom_fns(settings))
         # Las estrategias especificas de acciones se suman a las genericas
         # del scanner: son evidencia adicional de confluencia, no un gate.
         for candidate in scan_result.shortlist:
@@ -699,7 +713,7 @@ def run_crypto(settings) -> None:
             "is_meme": base_symbol in meme_symbols,
         }
 
-    scan_result = scan(price_data)
+    scan_result = scan(price_data, extra_strategies=_custom_fns(settings))
     _log(settings.logs_dir, "decisions.log", {
         "pool": "crypto", "result": "scan", **scan_result.as_metrics(),
     })
