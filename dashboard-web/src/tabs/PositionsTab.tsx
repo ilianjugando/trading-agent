@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { LivePosition } from "../api/client";
 import { Card, EmptyState, Table, Td, Th } from "../components/primitives";
+import { Sparkline } from "../components/Sparkline";
 import { BUCKET_LABELS, num, pct, pnlClass, POOL_LABELS, relativeTime, usd } from "../lib/format";
 
-function Row({ p }: { p: LivePosition }) {
+function Row({ p, spark }: { p: LivePosition; spark?: number[] }) {
   const [open, setOpen] = useState(false);
   const hasDetail = p.reasoning || p.asymmetry;
 
@@ -11,6 +12,7 @@ function Row({ p }: { p: LivePosition }) {
     <>
       <tr onClick={() => hasDetail && setOpen((v) => !v)} className={hasDetail ? "cursor-pointer" : ""}>
         <Td className="font-mono font-semibold">{p.symbol}</Td>
+        <Td><Sparkline points={spark ?? []} /></Td>
         <Td>{POOL_LABELS[p.pool] ?? p.pool}</Td>
         <Td>{p.bucket ? BUCKET_LABELS[p.bucket] ?? p.bucket : "—"}</Td>
         <Td align="right" className="font-mono">{usd(p.entry_price)}</Td>
@@ -25,7 +27,7 @@ function Row({ p }: { p: LivePosition }) {
       </tr>
       {open && hasDetail && (
         <tr>
-          <Td colSpan={10} className="bg-card-2">
+          <Td colSpan={11} className="bg-card-2">
             <div className="flex flex-col gap-2 py-2 text-sm">
               {p.strategy && <div><span className="text-muted">Estrategias: </span>{p.strategy}</div>}
               {p.reasoning && <div><span className="text-muted">Razón del panel: </span>{p.reasoning}</div>}
@@ -48,7 +50,7 @@ function Row({ p }: { p: LivePosition }) {
   );
 }
 
-export function PositionsTab({ positions }: { positions: LivePosition[] }) {
+export function PositionsTab({ positions, sparklines = {} }: { positions: LivePosition[]; sparklines?: Record<string, number[]> }) {
   return (
     <Card>
       {positions.length === 0 ? (
@@ -58,6 +60,7 @@ export function PositionsTab({ positions }: { positions: LivePosition[] }) {
           <thead>
             <tr>
               <Th>Símbolo</Th>
+              <Th>Precio</Th>
               <Th>Pool</Th>
               <Th>Bucket</Th>
               <Th align="right">Entrada</Th>
@@ -71,7 +74,7 @@ export function PositionsTab({ positions }: { positions: LivePosition[] }) {
           </thead>
           <tbody>
             {positions.map((p) => (
-              <Row key={`${p.pool}-${p.symbol}`} p={p} />
+              <Row key={`${p.pool}-${p.symbol}`} p={p} spark={sparklines[p.symbol]} />
             ))}
           </tbody>
         </Table>

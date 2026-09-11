@@ -465,6 +465,10 @@ export interface components {
             recent_trades: {
                 [key: string]: unknown;
             }[];
+            /** Sparklines */
+            sparklines: {
+                [key: string]: number[];
+            };
         };
         /** DeploymentAlert */
         DeploymentAlert: {

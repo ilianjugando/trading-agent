@@ -1,6 +1,6 @@
 import type { DashboardData, RawLog } from "../api/client";
 import { Card, Chip, EmptyState, SectionLabel, Table, Td, Th } from "../components/primitives";
-import { POOL_LABELS, relativeTime } from "../lib/format";
+import { POOL_LABELS, relativeTime, usd } from "../lib/format";
 
 /** Cada codigo de resultado en lenguaje humano. Sin esto el feed dice
  * el codigo crudo del log y hay que abrir el fuente para saber que paso. */
@@ -59,8 +59,26 @@ const RESULT_TONE: Record<string, "ok" | "bad" | "warn" | "muted"> = {
   skipped_already_running: "muted",
 };
 
+/** Una ejecucion como frase, no como fila de log. Crypto y acciones
+ * guardan campos distintos (instId/side/usd_amount vs symbol/action/qty),
+ * asi que se leen los dos de a uno. */
+function executionSentence(t: RawLog): string {
+  const symbol = (t.instId ?? t.symbol ?? "?") as string;
+  const side = String(t.side ?? t.action ?? "").toLowerCase();
+  const verb = side.startsWith("s") ? "Vendió" : "Compró";
+  const qty = t.qty as number | undefined;
+  const price = t.price as number | undefined;
+  const usdAmount = (t.usd_amount ?? (t.sizing as { usd?: number } | undefined)?.usd) as number | undefined;
+
+  const what = qty ? `${qty.toLocaleString("es-AR")} ${symbol}` : symbol;
+  const at = price ? ` a ${usd(price)}` : "";
+  const total = usdAmount ? ` · ${usd(usdAmount)}` : "";
+  const why = t.reason === "stop_loss" ? " · por stop-loss" : "";
+  return `${verb} ${what}${at}${total}${why}`;
+}
+
 export function ActivityTab({ data }: { data: DashboardData }) {
-  const { pools, watchlist, panel_sentiment, recent_decisions } = data;
+  const { pools, watchlist, panel_sentiment, recent_decisions, recent_trades } = data;
 
   return (
     <div className="flex flex-col gap-4">
@@ -132,6 +150,28 @@ export function ActivityTab({ data }: { data: DashboardData }) {
       </Card>
 
       <Card>
+        <SectionLabel>Ejecuciones</SectionLabel>
+        {recent_trades.length === 0 ? (
+          <EmptyState>El bot todavía no ejecutó ninguna orden.</EmptyState>
+        ) : (
+          <div className="mb-6 flex flex-col gap-2">
+            {recent_trades.slice(0, 12).map((t, i) => (
+              <div key={i} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card-2 px-3 py-2">
+                <div className="flex flex-col">
+                  <span className="text-sm text-fg">{executionSentence(t)}</span>
+                  <span className="font-mono text-[11px] text-muted">
+                    {POOL_LABELS[String(t.pool)] ?? String(t.pool)}
+                    {(t.sizing as { bucket?: string } | undefined)?.bucket ? ` · ${(t.sizing as { bucket?: string }).bucket}` : ""}
+                  </span>
+                </div>
+                <span className="font-mono text-xs text-muted">
+                  {t.timestamp ? new Date(String(t.timestamp)).toLocaleString("es-AR") : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <SectionLabel>Decisiones recientes</SectionLabel>
         {recent_decisions.length === 0 ? (
           <EmptyState>Sin actividad reciente.</EmptyState>

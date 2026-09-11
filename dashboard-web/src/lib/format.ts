@@ -1,7 +1,18 @@
 export function usd(value: number | null | undefined, opts: { showSign?: boolean } = {}): string {
   if (value === null || value === undefined) return "N/A";
   const sign = opts.showSign && value > 0 ? "+" : "";
-  return sign + value.toLocaleString("es-AR", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  // Los precios de cripto suelen ser sub-dolar: redondear a entero los
+  // mostraba todos como "US$ 0". Se usan tantos decimales como haga falta
+  // para que el numero signifique algo, y ninguno de mas en los montos
+  // grandes, donde los centavos son ruido.
+  const abs = Math.abs(value);
+  const digits = abs === 0 || abs >= 100 ? 0 : abs >= 1 ? 2 : abs >= 0.01 ? 4 : 8;
+  return sign + value.toLocaleString("es-AR", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
 }
 
 export function pct(value: number | null | undefined, opts: { showSign?: boolean } = {}): string {

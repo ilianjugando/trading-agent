@@ -83,7 +83,7 @@ export default function App() {
               <OverviewTab data={data} />
             </Tabs.Content>
             <Tabs.Content value="positions">
-              <PositionsTab positions={data.live_positions} />
+              <PositionsTab positions={data.live_positions} sparklines={data.sparklines} />
             </Tabs.Content>
             <Tabs.Content value="opportunities">
               <OpportunitiesTab discovery={data.discovery} livePositions={data.live_positions} />

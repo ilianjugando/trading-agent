@@ -133,6 +133,19 @@ def _watchlist_status() -> dict:
     }
 
 
+def _sparklines(points: int = 40) -> dict[str, list[float]]:
+    """Ultimos precios por simbolo, para dibujar una mini-curva al lado de
+    cada posicion. Sale de position_marks.jsonl, que el orchestrator ya
+    escribe en cada ciclo al chequear los stops -- no cuesta ni una
+    llamada extra al broker."""
+    series: dict[str, list[float]] = {}
+    for row in _tail_jsonl(LOGS_DIR / "position_marks.jsonl", 4000):
+        symbol, price = row.get("symbol"), row.get("price")
+        if symbol and isinstance(price, (int, float)):
+            series.setdefault(symbol, []).append(float(price))
+    return {k: v[-points:] for k, v in series.items() if len(v) >= 2}
+
+
 def _last_scan() -> dict | None:
     for entry in reversed(_tail_jsonl(LOGS_DIR / "decisions.log", 500)):
         if entry.get("result") == "tournament":
@@ -429,6 +442,7 @@ def build_data() -> dict:
         "last_error": errors[-1] if errors else None,
         "recent_decisions": list(reversed(feed))[:30],
         "recent_trades": list(reversed(trades)),
+        "sparklines": _sparklines(),
     }
     _cache["key"], _cache["data"] = key, data
     return data

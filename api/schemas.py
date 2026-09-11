@@ -215,6 +215,7 @@ class DashboardData(BaseModel):
     last_error: RawLog | None
     recent_decisions: list[RawLog]
     recent_trades: list[RawLog]
+    sparklines: dict[str, list[float]]
 
 
 class TaskStatusResponse(BaseModel):
