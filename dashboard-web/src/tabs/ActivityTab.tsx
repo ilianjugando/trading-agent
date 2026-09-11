@@ -2,6 +2,38 @@ import type { DashboardData, RawLog } from "../api/client";
 import { Card, Chip, EmptyState, SectionLabel, Table, Td, Th } from "../components/primitives";
 import { POOL_LABELS, relativeTime } from "../lib/format";
 
+/** Cada codigo de resultado en lenguaje humano. Sin esto el feed dice
+ * el codigo crudo del log y hay que abrir el fuente para saber que paso. */
+export const RESULT_LABELS: Record<string, string> = {
+  executed: "Compra ejecutada",
+  stopped_out: "Cerrada por stop-loss",
+  skipped: "El panel dijo que no",
+  skipped_panel_degraded: "El panel no pudo evaluar (modelos caidos)",
+  skipped_already_held: "Ya la tenemos en cartera",
+  skipped_portfolio_full: "Cartera llena",
+  skipped_capital_reserve: "Reserva de capital alcanzada",
+  skipped_sizing: "Quedaba muy chica para operar",
+  skipped_already_running: "Otro ciclo ya estaba corriendo",
+  blocked_by_kill_switch: "Bloqueada por el corte de emergencia",
+  phantom_position_cleared: "Posicion fantasma corregida",
+  position_reconciliation_alert: "El estado no coincide con el broker",
+  equity_reconciliation_alert: "Valuacion propia distinta a la del exchange",
+  market_data_errors: "Fallos bajando datos de mercado",
+  custom_strategies_error: "Error leyendo estrategias propias",
+  stale_lock_taken_over: "Se retomo un lock de un proceso muerto",
+  order_rejected: "Orden rechazada por el broker",
+  order_not_filled: "La orden no se lleno",
+  exit_error: "Fallo al cerrar la posicion",
+  rejected_by_spend_guard: "Freno el limite de gasto",
+  capital_deployment_alert: "Alerta: no se desplego capital",
+  halted: "Bot detenido por el circuit breaker",
+  error: "Error del ciclo",
+  scan: "Escaneo de mercado",
+  tournament: "Torneo de estrategias",
+  stop_trailed: "Stop subido",
+  market_closed: "Mercado cerrado",
+};
+
 const RESULT_TONE: Record<string, "ok" | "bad" | "warn" | "muted"> = {
   executed: "ok",
   skipped: "warn",
@@ -15,6 +47,16 @@ const RESULT_TONE: Record<string, "ok" | "bad" | "warn" | "muted"> = {
   halted: "bad",
   rejected_by_spend_guard: "bad",
   stopped_out: "bad",
+  skipped_panel_degraded: "bad",
+  blocked_by_kill_switch: "warn",
+  phantom_position_cleared: "warn",
+  position_reconciliation_alert: "bad",
+  equity_reconciliation_alert: "warn",
+  market_data_errors: "warn",
+  custom_strategies_error: "bad",
+  exit_error: "bad",
+  skipped_already_held: "muted",
+  skipped_already_running: "muted",
 };
 
 export function ActivityTab({ data }: { data: DashboardData }) {
@@ -114,7 +156,7 @@ export function ActivityTab({ data }: { data: DashboardData }) {
                     <Td className="font-mono text-xs">{raw.timestamp ? new Date(String(raw.timestamp)).toLocaleString("es-AR") : "—"}</Td>
                     <Td>{POOL_LABELS[String(raw.pool)] ?? String(raw.pool ?? "—")}</Td>
                     <Td className="font-mono">{symbol}</Td>
-                    <Td><Chip tone={RESULT_TONE[result] ?? "muted"}>{result}</Chip></Td>
+                    <Td><Chip tone={RESULT_TONE[result] ?? "muted"}>{RESULT_LABELS[result] ?? result}</Chip></Td>
                   </tr>
                 );
               })}

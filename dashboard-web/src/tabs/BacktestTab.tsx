@@ -1,4 +1,4 @@
-import { CandlestickSeries, createChart, createSeriesMarkers, type IChartApi, type Time } from "lightweight-charts";
+import { AreaSeries, CandlestickSeries, createChart, createSeriesMarkers, type IChartApi, type Time } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
 import type { BacktestRun } from "../api/client";
 import { api } from "../api/client";
@@ -75,6 +75,40 @@ function BacktestChart({ run }: { run: BacktestRun }) {
   }, [run]);
 
   return <div ref={containerRef} className="w-full" />;
+}
+
+function EquityCurve({ curve }: { curve: number[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || curve.length < 2) return;
+    const st = getComputedStyle(document.documentElement);
+    const chart = createChart(el, {
+      width: el.clientWidth,
+      height: 200,
+      layout: { background: { color: "transparent" }, textColor: st.getPropertyValue("--muted").trim(), fontFamily: "Fira Code, monospace", fontSize: 11 },
+      grid: { horzLines: { color: st.getPropertyValue("--border").trim() }, vertLines: { visible: false } },
+      rightPriceScale: { borderColor: st.getPropertyValue("--border").trim() },
+      timeScale: { visible: false },
+    });
+    const up = curve[curve.length - 1] >= curve[0];
+    const color = up ? "#26a69a" : "#ef5350";
+    const s = chart.addSeries(AreaSeries, {
+      lineColor: color,
+      topColor: `color-mix(in srgb, ${color} 30%, transparent)`,
+      bottomColor: "transparent",
+      lineWidth: 2,
+      priceFormat: { type: "custom", formatter: (v: number) => `${(v - 100).toFixed(1)}%` },
+    });
+    // El eje X es el numero de OPERACION, no el tiempo: la curva avanza
+    // cuando se cierra un trade, no cuando pasa un dia.
+    s.setData(curve.map((v, i) => ({ time: (i + 1) as Time, value: v })));
+    chart.timeScale().fitContent();
+    const resize = () => chart.applyOptions({ width: el.clientWidth });
+    window.addEventListener("resize", resize);
+    return () => { window.removeEventListener("resize", resize); chart.remove(); };
+  }, [curve]);
+  return <div ref={ref} className="w-full" />;
 }
 
 export function BacktestTab() {
@@ -195,6 +229,44 @@ export function BacktestTab() {
             <BacktestChart run={run} />
             <div className="mt-2 text-xs text-muted">▲ entrada · ▼ salida (verde ganadora, roja perdedora)</div>
           </Card>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Card className="lg:col-span-2">
+              <SectionLabel>Curva de capital</SectionLabel>
+              <EquityCurve curve={run.equity_curve} />
+              <div className="mt-2 text-xs text-muted">Avanza por operación cerrada, no por tiempo.</div>
+            </Card>
+            <Card>
+              <SectionLabel>Cómo salió de cada operación</SectionLabel>
+              {(() => {
+                const by: Record<string, { n: number; pnl: number }> = {};
+                for (const t of run.trades) {
+                  const k = t.exit_reason ?? "abierta";
+                  by[k] = by[k] ?? { n: 0, pnl: 0 };
+                  by[k].n += 1;
+                  by[k].pnl += t.pnl_pct ?? 0;
+                }
+                const LABELS: Record<string, string> = {
+                  target: "Llegó al objetivo",
+                  stop_loss: "Tocó el stop",
+                  end_of_window: "Abierta al final",
+                  abierta: "Sin cerrar",
+                };
+                return (
+                  <div className="flex flex-col gap-2">
+                    {Object.entries(by).map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between gap-3 rounded-md border border-border bg-card-2 px-3 py-2">
+                        <span className="text-sm">{LABELS[k] ?? k}</span>
+                        <span className="font-mono text-sm">
+                          {v.n}× <span className={pnlClass(v.pnl)}>{pct(v.pnl, { showSign: true })}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </Card>
+          </div>
 
           <Card>
             <SectionLabel>Operaciones</SectionLabel>
