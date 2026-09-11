@@ -366,6 +366,54 @@ def _loss_fraction(pos: dict, exit_price: float, pool_value: float) -> float | N
     return loss_usd / pool_value
 
 
+def _manage_stock_exits(settings, ibkr, positions, breaker, pool_value) -> None:
+    """Cierra posiciones cuyo stop se toco; si no, sube el stop cuando se
+    formo una caja nueva mas alta.
+
+    Cada simbolo va aislado, igual que en _manage_crypto_exits. Antes este
+    bucle estaba inline en run_stocks sin proteccion: un unico simbolo sin
+    precio tiraba la excepcion hasta arriba y las posiciones SIGUIENTES se
+    quedaban sin chequeo de stop-loss ese ciclo. No es hipotetico -- la
+    canasta traia ABB (sin listado en USD; el ADR es ABBNY en PINK) e IRBT
+    (ahora IRBTQ, en quiebra), y un delisting o un halt hacen lo mismo con
+    cualquier simbolo. Un corte tiene que frenar riesgo nuevo, nunca la
+    reduccion del riesgo ya tomado.
+    """
+    for symbol, pos in list(positions.all_open().items()):
+        try:
+            price = ibkr.get_last_price(symbol)
+            _log(settings.logs_dir, "position_marks.jsonl", {"pool": "stocks", "symbol": symbol, "price": price})
+        except Exception as e:
+            _log(settings.logs_dir, "decisions.log", {
+                "pool": "stocks", "symbol": symbol, "result": "price_lookup_error", "reason": str(e),
+            })
+            continue
+
+        try:
+            if price <= pos["stop"]:
+                result = ibkr.place_market_order_by_qty(symbol, pos["qty"], "SELL")
+                won = price > pos["entry_price"]
+                positions.close(symbol)
+                breaker.record_trade_result(won, loss_pct_of_pool=_loss_fraction(pos, price, pool_value))
+                _log(settings.logs_dir, "trades.log", {"pool": "stocks", "reason": "stop_loss", **result})
+                _log(settings.logs_dir, "decisions.log", {
+                    "pool": "stocks", "symbol": symbol, "result": "stopped_out", "won": won,
+                    "stop": pos["stop"], "price": price,
+                })
+                continue
+
+            box = compute_box(symbol)
+            if box and box.box_bottom > pos["stop"]:
+                positions.update_stop(symbol, box.box_bottom)
+                _log(settings.logs_dir, "decisions.log", {
+                    "pool": "stocks", "symbol": symbol, "result": "stop_trailed", "new_stop": box.box_bottom,
+                })
+        except Exception as e:
+            _log(settings.logs_dir, "decisions.log", {
+                "pool": "stocks", "symbol": symbol, "result": "exit_error", "reason": str(e),
+            })
+
+
 def _manage_crypto_exits(settings, okx, positions, breaker, pool_value) -> None:
     """Cierra posiciones cuyo stop se toco. Antes de esto la pierna de
     crypto solo compraba: no tenia salidas ni registro de posiciones, asi
@@ -463,27 +511,7 @@ def run_stocks(settings) -> None:
         #
         # Manage existing positions first: exit on a stop-loss hit, otherwise
         # trail the stop up if a fresh, higher box has formed.
-        for symbol, pos in list(positions.all_open().items()):
-            price = ibkr.get_last_price(symbol)
-            _log(settings.logs_dir, "position_marks.jsonl", {"pool": "stocks", "symbol": symbol, "price": price})
-            if price <= pos["stop"]:
-                result = ibkr.place_market_order_by_qty(symbol, pos["qty"], "SELL")
-                won = price > pos["entry_price"]
-                positions.close(symbol)
-                breaker.record_trade_result(won, loss_pct_of_pool=_loss_fraction(pos, price, pool_value))
-                _log(settings.logs_dir, "trades.log", {"pool": "stocks", "reason": "stop_loss", **result})
-                _log(settings.logs_dir, "decisions.log", {
-                    "pool": "stocks", "symbol": symbol, "result": "stopped_out", "won": won,
-                    "stop": pos["stop"], "price": price,
-                })
-                continue
-
-            box = compute_box(symbol)
-            if box and box.box_bottom > pos["stop"]:
-                positions.update_stop(symbol, box.box_bottom)
-                _log(settings.logs_dir, "decisions.log", {
-                    "pool": "stocks", "symbol": symbol, "result": "stop_trailed", "new_stop": box.box_bottom,
-                })
+        _manage_stock_exits(settings, ibkr, positions, breaker, pool_value)
 
         # A partir de aca es todo camino de ENTRADA: eso si lo gatea el corte.
         breaker.check(pool_value)

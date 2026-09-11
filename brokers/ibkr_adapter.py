@@ -47,9 +47,25 @@ class IBKRAdapter:
     def get_positions(self) -> dict:
         return {p.contract.symbol: p.position for p in self.ib.positions()}
 
-    def get_last_price(self, symbol: str) -> float:
+    def _contract(self, symbol: str) -> Stock:
+        """qualifyContracts devuelve [] para un simbolo que IBKR no conoce
+        y no levanta nada, asi que el contrato sin cualificar seguia de
+        largo y el fallo recien aparecia mas tarde como "todos los campos
+        vinieron vacios o NaN" -- un mensaje que culpa al dato cuando la
+        causa es que el simbolo no existe (delistado, en quiebra, o sin
+        listado en USD)."""
         contract = Stock(symbol, "SMART", "USD")
         self.ib.qualifyContracts(contract)
+        # El chequeo va contra conId, no contra el valor de retorno:
+        # qualifyContracts devuelve el contrato igual cuando IBKR no lo
+        # reconoce (solo loguea "Unknown contract"), nada mas que con
+        # conId=0. Verificado en vivo con ABB e IRBT.
+        if not contract.conId:
+            raise ValueError(f"IBKR no reconoce {symbol}: sin definicion en SMART/USD")
+        return contract
+
+    def get_last_price(self, symbol: str) -> float:
+        contract = self._contract(symbol)
         ticker = self.ib.reqMktData(contract)
         self.ib.sleep(3)
         # Se prueban varios campos por orden de preferencia: con datos
@@ -80,8 +96,7 @@ class IBKRAdapter:
     def place_market_order_by_qty(self, symbol: str, qty: int, action: str) -> dict:
         """For exiting an exact held position (e.g. a stop-loss sell), where
         sizing by dollar amount would round to the wrong share count."""
-        contract = Stock(symbol, "SMART", "USD")
-        self.ib.qualifyContracts(contract)
+        contract = self._contract(symbol)
         order = MarketOrder(action, qty)
         trade = self.ib.placeOrder(contract, order)
         self.ib.sleep(2)

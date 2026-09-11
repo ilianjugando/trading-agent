@@ -7,6 +7,7 @@ from execution.orchestrator import (
     _check_deployment_alert,
     _evaluate_candidates,
     _manage_crypto_exits,
+    _manage_stock_exits,
     _market_is_open,
 )
 from execution.positions import PositionTracker
@@ -307,3 +308,51 @@ def test_a_broken_pool_does_not_stop_the_other_one(tmp_path, monkeypatch):
 
     results = {(d.get("pool"), d.get("result")) for d in _decisions(tmp_path)}
     assert ("stocks", "error") in results, "el error se atribuye al pool que fallo, no a 'both'"
+
+
+def test_un_simbolo_sin_precio_no_saltea_el_stop_loss_del_siguiente(tmp_path):
+    """ABB va primero a proposito: antes su excepcion subia hasta run_stocks
+    y NVDA -- que SI tenia el stop tocado -- se quedaba sin salida ese ciclo."""
+
+    class _IBKR:
+        def __init__(self):
+            self.sold = []
+
+        def get_last_price(self, symbol):
+            if symbol == "ABB":
+                raise ValueError("IBKR no reconoce ABB: sin definicion en SMART/USD")
+            return 90.0
+
+        def place_market_order_by_qty(self, symbol, qty, action):
+            self.sold.append(symbol)
+            return {"symbol": symbol, "qty": qty, "action": action, "status": "Filled"}
+
+    class _Positions:
+        def __init__(self, data):
+            self.data = data
+
+        def all_open(self):
+            return self.data
+
+        def close(self, symbol):
+            self.data.pop(symbol, None)
+
+        def update_stop(self, symbol, stop):
+            self.data[symbol]["stop"] = stop
+
+    class _Breaker:
+        def record_trade_result(self, won, loss_pct_of_pool=None):
+            pass
+
+    ibkr = _IBKR()
+    positions = _Positions({
+        "ABB": {"stop": 50.0, "entry_price": 55.0, "qty": 1},
+        "NVDA": {"stop": 100.0, "entry_price": 110.0, "qty": 2},
+    })
+
+    _manage_stock_exits(_settings(tmp_path), ibkr, positions, _Breaker(), 1000.0)
+
+    assert ibkr.sold == ["NVDA"], "el stop de NVDA tiene que ejecutarse igual"
+    results = {d["result"] for d in _decisions(tmp_path)}
+    assert "price_lookup_error" in results, "ABB tiene que quedar registrado, no silenciado"
+    assert "stopped_out" in results

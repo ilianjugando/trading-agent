@@ -4,11 +4,13 @@
 # Mix of pure-plays and suppliers so the "trend" signal can catch the theme
 # even when the flagship names (e.g. NVDA) are crowded/expensive.
 ROBOTICS_BASKET = [
+    # Verificado contra IBKR (2026-09-11): estos cotizan en SMART/USD.
+    # Salieron IRBT (ahora IRBTQ, en quiebra) y ABB (sin listado en USD;
+    # el ADR es ABBNY en PINK) -- IBKR devolvia error 200 para ambos, o
+    # sea que una ruptura ahi no se podia ejecutar.
     "ISRG",   # Intuitive Surgical - surgical robotics
-    "IRBT",   # iRobot
     "TER",    # Teradyne - owns Universal Robots
     "ROK",    # Rockwell Automation
-    "ABB",    # ABB - industrial robotics
     "FANUY",  # Fanuc ADR
     "PATH",   # UiPath - software robotics/RPA
     "NVDA",   # Nvidia - compute backbone
