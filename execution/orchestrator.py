@@ -22,6 +22,7 @@ from config import limits
 from config.settings import load_settings
 from config.universe import resolve_stock_universe
 from execution import tournament
+from execution import reconcile
 from execution.positions import PositionTracker
 from execution.run_lock import AlreadyRunning, RunLock
 from execution.sizing import BUCKET_CAPS, classify_bucket, size_position
@@ -428,6 +429,18 @@ def run_stocks(settings) -> None:
         pool_value = ibkr.get_account_value()
         _snapshot_portfolio(settings, "stocks", pool_value, positions)
 
+        # Reconciliacion contra el broker (seccion 13). Solo compara y
+        # avisa: corregir el estado en silencio es como se pierde el rastro
+        # de lo que realmente paso.
+        try:
+            rec = reconcile.compare("stocks", positions.all_open(), ibkr.get_positions())
+            if not rec.clean:
+                _log(settings.logs_dir, "decisions.log", rec.as_log_record())
+        except Exception as e:
+            _log(settings.logs_dir, "decisions.log", {
+                "pool": "stocks", "result": "reconciliation_error", "reason": str(e),
+            })
+
         # Las salidas van SIEMPRE, y van ANTES del corte -- mismo P0 que en
         # run_crypto (auditoria 2026-09-10): con breaker.check() primero, al
         # dispararse el corte este bucle no llegaba a correr nunca y las
@@ -581,6 +594,17 @@ def run_crypto(settings) -> None:
             "pool": "crypto", "result": "unpriced_holdings",
             "holdings": equity["unpriced"],
             "detail": "activos en la cuenta que no se pudieron valuar -- quedan fuera del pool_value",
+        })
+
+    try:
+        held_now = positions.all_open()
+        broker_qty = {inst: okx.get_balance(inst.split("-")[0]) for inst in held_now}
+        rec = reconcile.compare("crypto", held_now, broker_qty)
+        if not rec.clean:
+            _log(settings.logs_dir, "decisions.log", rec.as_log_record())
+    except Exception as e:
+        _log(settings.logs_dir, "decisions.log", {
+            "pool": "crypto", "result": "reconciliation_error", "reason": str(e),
         })
 
     _snapshot_portfolio(settings, "crypto", pool_value, positions)
