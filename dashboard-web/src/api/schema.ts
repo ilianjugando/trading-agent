@@ -12,7 +12,7 @@ export interface paths {
             cookie?: never;
         };
         /** Get Data */
-        get: operations["get_data_data_get"];
+        get: operations["estado_del_bot"];
         put?: never;
         post?: never;
         delete?: never;
@@ -29,7 +29,7 @@ export interface paths {
             cookie?: never;
         };
         /** Get Bot Status */
-        get: operations["get_bot_status_bot_status_get"];
+        get: operations["estado_de_las_tareas"];
         put?: never;
         post?: never;
         delete?: never;
@@ -65,7 +65,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Post Bot Stop */
-        post: operations["post_bot_stop_bot_stop_post"];
+        post: operations["detener_el_bot"];
         delete?: never;
         options?: never;
         head?: never;
@@ -80,7 +80,7 @@ export interface paths {
             cookie?: never;
         };
         /** Get Kill Switch */
-        get: operations["get_kill_switch_kill_switch_get"];
+        get: operations["estado_del_corte"];
         put?: never;
         post?: never;
         delete?: never;
@@ -103,7 +103,7 @@ export interface paths {
          * @description Corta la apertura de posiciones NUEVAS. Las salidas (stop-loss)
          *     siguen ejecutandose siempre -- ver risk/kill_switch.py.
          */
-        post: operations["post_kill_switch_engage_kill_switch_engage_post"];
+        post: operations["accionar_el_corte"];
         delete?: never;
         options?: never;
         head?: never;
@@ -138,7 +138,7 @@ export interface paths {
          * Get Backtest
          * @description Replay de una estrategia sobre historia real. Sin LLM y sin ordenes.
          */
-        get: operations["get_backtest_backtest_get"];
+        get: operations["backtest"];
         put?: never;
         post?: never;
         delete?: never;
@@ -155,7 +155,7 @@ export interface paths {
             cookie?: never;
         };
         /** Get Custom Strategies */
-        get: operations["get_custom_strategies_strategies_custom_get"];
+        get: operations["listar_estrategias"];
         put?: never;
         /** Post Custom Strategy */
         post: operations["post_custom_strategy_strategies_custom_post"];
@@ -182,6 +182,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/strategies/translate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Translate Strategy
+         * @description Descripcion en castellano -> reglas propuestas. NO guarda nada: lo
+         *     que devuelve el modelo es una propuesta para que el usuario la revise
+         *     antes de activarla.
+         */
+        post: operations["post_translate_strategy_strategies_translate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/market-radar": {
         parameters: {
             query?: never;
@@ -194,7 +216,7 @@ export interface paths {
          * @description Puramente informativo -- ver signals/market_radar.py. No alimenta
          *     ninguna decision de compra.
          */
-        get: operations["get_market_radar_market_radar_get"];
+        get: operations["radar_de_mercado"];
         put?: never;
         post?: never;
         delete?: never;
@@ -701,6 +723,18 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** TranslateRequest */
+        TranslateRequest: {
+            /** Description */
+            description: string;
+        };
+        /** TranslatedStrategy */
+        TranslatedStrategy: {
+            /** Entry */
+            entry: components["schemas"]["StrategyRule"][];
+            /** Resumen */
+            resumen: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -755,7 +789,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    get_data_data_get: {
+    estado_del_bot: {
         parameters: {
             query?: never;
             header?: never;
@@ -775,7 +809,7 @@ export interface operations {
             };
         };
     };
-    get_bot_status_bot_status_get: {
+    estado_de_las_tareas: {
         parameters: {
             query?: never;
             header?: never;
@@ -815,7 +849,7 @@ export interface operations {
             };
         };
     };
-    post_bot_stop_bot_stop_post: {
+    detener_el_bot: {
         parameters: {
             query?: never;
             header?: never;
@@ -835,7 +869,7 @@ export interface operations {
             };
         };
     };
-    get_kill_switch_kill_switch_get: {
+    estado_del_corte: {
         parameters: {
             query?: never;
             header?: never;
@@ -855,7 +889,7 @@ export interface operations {
             };
         };
     };
-    post_kill_switch_engage_kill_switch_engage_post: {
+    accionar_el_corte: {
         parameters: {
             query?: never;
             header?: never;
@@ -908,7 +942,7 @@ export interface operations {
             };
         };
     };
-    get_backtest_backtest_get: {
+    backtest: {
         parameters: {
             query?: {
                 symbol?: string;
@@ -941,7 +975,7 @@ export interface operations {
             };
         };
     };
-    get_custom_strategies_strategies_custom_get: {
+    listar_estrategias: {
         parameters: {
             query?: never;
             header?: never;
@@ -1025,7 +1059,40 @@ export interface operations {
             };
         };
     };
-    get_market_radar_market_radar_get: {
+    post_translate_strategy_strategies_translate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranslateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslatedStrategy"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    radar_de_mercado: {
         parameters: {
             query?: never;
             header?: never;

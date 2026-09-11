@@ -87,3 +87,45 @@ def test_a_custom_spec_can_reproduce_an_existing_strategy():
     from signals.strategies import mean_reversion
 
     assert (spec.as_fn()(crash) is None) == (mean_reversion(crash) is None)
+
+
+def test_translation_only_keeps_indicators_we_actually_have(monkeypatch):
+    """Lo que devuelve el modelo es una PROPUESTA, no algo en lo que se
+    confie: se filtra contra el mismo whitelist que usa save(). Si el
+    modelo inventa un indicador, se descarta en vez de guardarse."""
+    import signals.custom as custom
+
+    class _FakeModels:
+        def generate_content(self, model, contents):
+            class R:
+                text = '{"entry": [{"indicator": "rsi", "op": "<", "value": 30}, {"indicator": "inventado", "op": "<", "value": 1}], "resumen": "prueba"}'
+            return R()
+
+    class _FakeClient:
+        def __init__(self, api_key=None):
+            self.models = _FakeModels()
+
+    monkeypatch.setattr("signals.llm_review.genai", type("g", (), {"Client": _FakeClient}))
+
+    out = custom.from_description("lo que sea", "fake-key")
+    assert len(out["entry"]) == 1
+    assert out["entry"][0]["indicator"] == "rsi"
+
+
+def test_translation_that_yields_nothing_usable_is_an_error(monkeypatch):
+    import signals.custom as custom
+
+    class _FakeModels:
+        def generate_content(self, model, contents):
+            class R:
+                text = '{"entry": [{"indicator": "no_existe", "op": "<", "value": 1}], "resumen": ""}'
+            return R()
+
+    class _FakeClient:
+        def __init__(self, api_key=None):
+            self.models = _FakeModels()
+
+    monkeypatch.setattr("signals.llm_review.genai", type("g", (), {"Client": _FakeClient}))
+
+    with pytest.raises(ValueError, match="no se pudo traducir"):
+        custom.from_description("algo raro", "fake-key")

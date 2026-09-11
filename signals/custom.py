@@ -127,3 +127,59 @@ def delete(state_dir: Path, name: str) -> bool:
     del all_specs[name]
     write_json_atomic(_path(state_dir), {n: asdict(s) for n, s in all_specs.items()})
     return True
+
+
+# --- Traducir una descripcion en castellano a reglas -------------------
+
+_TRANSLATE_PROMPT = """Convertis la descripcion de una estrategia de trading en reglas de compra.
+
+Indicadores disponibles (usa EXACTAMENTE estos nombres):
+- rsi: RSI de 14 periodos, 0 a 100
+- sma_trend: tendencia, valores "up" | "down" | "flat"
+- change_pct: variacion porcentual de la ultima barra
+- change_5_pct: variacion porcentual de las ultimas 5 barras
+- above_high_20: true si rompe el maximo de las ultimas 20 barras
+- below_low_20: true si rompe el minimo de las ultimas 20 barras
+
+Operadores: < <= > >= == !=
+
+Reglas:
+- Devolve SOLO JSON, sin explicaciones ni markdown.
+- Formato: {{"entry": [{{"indicator": "...", "op": "...", "value": ...}}], "resumen": "..."}}
+- TODAS las condiciones se combinan con Y logico.
+- No inventes indicadores: si la descripcion pide algo que no esta en la
+  lista, aproximalo con los que hay o ignoralo.
+- La SALIDA no se define: el sistema usa su propia medicion de stop y
+  objetivo. No devuelvas nada sobre salidas.
+- "resumen" es una frase corta en castellano de lo que hace la estrategia.
+
+Descripcion: {description}"""
+
+
+def from_description(description: str, gemini_api_key: str, nvidia_api_key: str = "") -> dict:
+    """Descripcion en castellano -> reglas propuestas.
+
+    Devuelve {"entry": [...], "resumen": "..."} para que el usuario lo
+    revise ANTES de guardarlo. A proposito no guarda nada: un modelo
+    traduciendo texto libre a algo que despues opera con plata real tiene
+    que pasar por una confirmacion humana, igual que el panel nunca
+    coloca una orden por su cuenta.
+    """
+    from signals.llm_review import _GEMINI_MODEL, genai
+
+    prompt = _TRANSLATE_PROMPT.format(description=description)
+    client = genai.Client(api_key=gemini_api_key)
+    text = client.models.generate_content(model=_GEMINI_MODEL, contents=prompt).text
+    text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    data = json.loads(text)
+
+    # Se valida contra el mismo whitelist que usa save(): lo que el modelo
+    # devuelve es una PROPUESTA, no algo en lo que se confie.
+    rules = []
+    for r in data.get("entry", []):
+        ind, op = r.get("indicator"), r.get("op")
+        if ind in INDICATORS and op in OPS:
+            rules.append(Rule(ind, op, r.get("value")))
+    if not rules:
+        raise ValueError("no se pudo traducir esa descripcion a reglas conocidas")
+    return {"entry": [asdict(r) for r in rules], "resumen": str(data.get("resumen", ""))[:200]}

@@ -30,6 +30,22 @@ export function StrategyBuilder({ onChanged }: { onChanged?: () => void }) {
   const [rules, setRules] = useState<StrategyRule[]>([emptyRule()]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [idea, setIdea] = useState("");
+  const [translating, setTranslating] = useState(false);
+
+  async function translate() {
+    setTranslating(true);
+    setError(null);
+    try {
+      const t = await api.translateStrategy(idea);
+      setRules(t.entry);
+      if (!description) setDescription(t.resumen);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTranslating(false);
+    }
+  }
 
   async function refresh() {
     const r = await api.customStrategies();
@@ -99,6 +115,30 @@ export function StrategyBuilder({ onChanged }: { onChanged?: () => void }) {
 
       <Card>
         <SectionLabel>Crear una estrategia</SectionLabel>
+
+        <div className="mb-5 rounded-lg border border-ai bg-ai-soft p-3">
+          <span className="text-[11px] uppercase tracking-wider text-ai">Describila en castellano</span>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <input
+              value={idea}
+              onChange={(e) => setIdea(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && idea && translate()}
+              placeholder="comprar cuando el RSI baje de 35 y la tendencia siga alcista"
+              className="min-w-64 flex-1 rounded-md border border-border bg-card px-2 py-1.5 text-sm text-fg"
+            />
+            <button
+              onClick={translate}
+              disabled={translating || !idea}
+              className="cursor-pointer rounded-md bg-ai px-4 py-2 font-mono text-sm font-semibold text-bg disabled:opacity-50"
+            >
+              {translating ? "Traduciendo…" : "Traducir a reglas"}
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-muted">
+            El modelo propone las condiciones y las completa abajo. Revisalas antes de guardar: lo que devuelve es una
+            propuesta, no algo que se active solo.
+          </p>
+        </div>
         <div className="flex flex-wrap gap-3">
           <label className="flex flex-col gap-1">
             <span className="text-[11px] uppercase tracking-wider text-muted">Nombre</span>

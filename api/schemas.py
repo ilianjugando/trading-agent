@@ -288,6 +288,15 @@ class CustomStrategyList(BaseModel):
     available_operators: list[str]
 
 
+class TranslateRequest(BaseModel):
+    description: str
+
+
+class TranslatedStrategy(BaseModel):
+    entry: list[StrategyRule]
+    resumen: str
+
+
 class Mover(BaseModel):
     symbol: str
     exchange: str

@@ -16,6 +16,7 @@ export type BacktestRun = components["schemas"]["BacktestRun"];
 export type CustomStrategy = components["schemas"]["CustomStrategy"];
 export type CustomStrategyList = components["schemas"]["CustomStrategyList"];
 export type StrategyRule = components["schemas"]["StrategyRule"];
+export type TranslatedStrategy = components["schemas"]["TranslatedStrategy"];
 export type RawLog = Record<string, unknown>;
 
 async function getJSON<T>(path: string): Promise<T> {
@@ -41,6 +42,8 @@ export const api = {
   botStop: () => postJSON<TaskStatusResponse>("/bot-stop"),
   marketRadar: () => getJSON<MarketRadar>("/market-radar"),
   customStrategies: () => getJSON<CustomStrategyList>("/strategies/custom"),
+  translateStrategy: (description: string) =>
+    postJSON<TranslatedStrategy>("/strategies/translate", { description }),
   saveStrategy: (s: CustomStrategy) => postJSON<CustomStrategyList>("/strategies/custom", s),
   deleteStrategy: async (name: string) => {
     const res = await fetch(`/strategies/custom/${encodeURIComponent(name)}`, { method: "DELETE" });

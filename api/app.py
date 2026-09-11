@@ -35,7 +35,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api import bot_control, data
 from api.mcp_server import mcp as _mcp
-from api.schemas import BacktestRun, CustomStrategy, CustomStrategyList, DashboardData, KillSwitchRequest, KillSwitchStatus, MarketRadar, TaskStatusResponse
+from api.schemas import BacktestRun, CustomStrategy, CustomStrategyList, DashboardData, TranslatedStrategy, TranslateRequest, KillSwitchRequest, KillSwitchStatus, MarketRadar, TaskStatusResponse
 from risk import kill_switch
 from signals import market_radar
 
@@ -171,6 +171,25 @@ def delete_custom_strategy(name: str) -> dict:
     if not delete(data.STATE_DIR, name):
         raise HTTPException(status_code=404, detail=f"no existe la estrategia {name!r}")
     return get_custom_strategies()
+
+
+@app.post("/strategies/translate", response_model=TranslatedStrategy)
+def post_translate_strategy(body: TranslateRequest) -> dict:
+    """Descripcion en castellano -> reglas propuestas. NO guarda nada: lo
+    que devuelve el modelo es una propuesta para que el usuario la revise
+    antes de activarla."""
+    from config.settings import load_settings
+    from signals.custom import from_description
+
+    settings = load_settings()
+    if not settings.gemini_api_key:
+        raise HTTPException(status_code=503, detail="falta GEMINI_API_KEY en .env")
+    try:
+        return from_description(body.description, settings.gemini_api_key)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"el modelo no pudo traducirlo: {e}") from e
 
 
 @app.get("/market-radar", response_model=MarketRadar, operation_id="radar_de_mercado")

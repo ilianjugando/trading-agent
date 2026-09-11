@@ -23,6 +23,7 @@ from config.settings import load_settings
 from config.universe import resolve_stock_universe
 from execution import tournament
 from execution import reconcile
+from execution import notify
 from execution.positions import PositionTracker
 from execution.run_lock import AlreadyRunning, RunLock
 from execution.sizing import BUCKET_CAPS, classify_bucket, size_position
